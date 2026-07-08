@@ -7,6 +7,7 @@ import CategoryManagement from '@/components/category/CategoryManagement.vue'
 import TagManagement from '@/components/tag/TagManagement.vue'
 import ArticleManagement from '@/components/article/ArticleManagement.vue'
 import PptManagement from '@/components/ppt/PptManagement.vue'
+import VideoManagement from '@/components/video/VideoManagement.vue'
 import { fetchCurrentUser } from '@/services/api'
 import { clearSession, getStoredUser, setStoredUser } from '@/services/auth'
 
@@ -82,6 +83,7 @@ function logout() { clearSession(); router.replace('/login') }
         <TagManagement v-else-if="active === '标签管理'" />
         <ArticleManagement v-else-if="active === '文章管理'" />
         <PptManagement v-else-if="active === 'PPT管理'" />
+        <VideoManagement v-else-if="active === '视频管理'" />
         <div v-else class="empty-module"></div>
       </div>
     </section>

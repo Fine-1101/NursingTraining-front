@@ -1,4 +1,5 @@
 import { ApiError, request } from './api'
+import { UPLOAD_TYPES, uploadFile } from './file'
 
 const ROOT = '/api/admin/ppts'
 
@@ -26,20 +27,6 @@ export const deletePpt = (id) => request(`${ROOT}/${id}`, { method: 'DELETE' }).
 export const getPptDownload = (id) => request(`${ROOT}/${id}/download-url`).then(unwrap)
 
 export async function uploadPptFile(file) {
-  const policy = unwrap(await request('/api/files/policy', {
-    method: 'POST',
-    body: JSON.stringify({ fileName: file.name, contentType: file.type, directory: 'ppts/originals' }),
-  }))
-  const form = new FormData()
-  form.append('key', policy.key)
-  form.append('policy', policy.policy)
-  form.append('OSSAccessKeyId', policy.accessKeyId)
-  form.append('signature', policy.signature)
-  form.append('Content-Type', policy.contentType)
-  form.append('file', file)
-  let response
-  try { response = await fetch(policy.host, { method: 'POST', body: form }) }
-  catch { throw new ApiError('PPT 上传失败，请检查网络连接', 0) }
-  if (!response.ok) throw new ApiError('PPT 上传失败，请稍后重试', response.status)
-  return { originalUrl: `${policy.host.replace(/\/$/, '')}/${policy.key}`, originalName: file.name, fileSize: file.size }
+  const result = await uploadFile(file, UPLOAD_TYPES.PPT_FILE)
+  return { originalUrl: result.url, originalName: result.originalFileName, fileSize: result.size }
 }

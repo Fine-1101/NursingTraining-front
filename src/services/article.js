@@ -1,4 +1,5 @@
 import { ApiError, request } from './api'
+import { uploadFile } from './file'
 
 const ROOT = '/api/admin/articles'
 
@@ -27,21 +28,7 @@ export const batchPublishArticles = (ids) => request(`${ROOT}/batch-publish`, { 
 export const deleteArticle = (id) => request(`${ROOT}/${id}`, { method: 'DELETE' }).then(unwrap)
 export const deleteArticles = (ids) => request(`${ROOT}/batch`, { method: 'DELETE', body: JSON.stringify({ ids }) }).then(unwrap)
 
-export async function uploadArticleFile(file, directory) {
-  const policy = unwrap(await request('/api/files/policy', {
-    method: 'POST',
-    body: JSON.stringify({ fileName: file.name, contentType: file.type, directory }),
-  }))
-  const form = new FormData()
-  form.append('key', policy.key)
-  form.append('policy', policy.policy)
-  form.append('OSSAccessKeyId', policy.accessKeyId)
-  form.append('signature', policy.signature)
-  form.append('Content-Type', policy.contentType)
-  form.append('file', file)
-  let response
-  try { response = await fetch(policy.host, { method: 'POST', body: form }) }
-  catch { throw new ApiError('文件上传失败，请检查网络连接', 0) }
-  if (!response.ok) throw new ApiError('文件上传失败，请稍后重试', response.status)
-  return { url: `${policy.host.replace(/\/$/, '')}/${policy.key}`, name: file.name, size: file.size }
+export async function uploadArticleFile(file, uploadType) {
+  const result = await uploadFile(file, uploadType)
+  return { url: result.url, name: result.originalFileName, size: result.size }
 }
