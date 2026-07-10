@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import AppIcon from '@/components/AppIcon.vue'
 import BrandLogo from '@/components/BrandLogo.vue'
@@ -8,6 +8,8 @@ import TagManagement from '@/components/tag/TagManagement.vue'
 import ArticleManagement from '@/components/article/ArticleManagement.vue'
 import PptManagement from '@/components/ppt/PptManagement.vue'
 import VideoManagement from '@/components/video/VideoManagement.vue'
+import CourseCreate from '@/components/course/CourseCreate.vue'
+import CourseManagement from '@/components/course/CourseManagement.vue'
 import { fetchCurrentUser } from '@/services/api'
 import { clearSession, getStoredUser, setStoredUser } from '@/services/auth'
 
@@ -18,6 +20,7 @@ const libraryOpen = ref(true)
 const active = ref('首页面板')
 const user = ref(getStoredUser() || {})
 const profileOpen = ref(false)
+const courseEditor = reactive({ id:null, resetKey:0 })
 
 const displayName = computed(() => user.value?.name || user.value?.username || '护理管理员')
 const displayEmail = computed(() => user.value?.email || 'admin@nursing.com')
@@ -36,7 +39,31 @@ onMounted(async () => {
   catch { /* request layer handles authentication failures */ }
 })
 
-function select(label) { active.value = label }
+function select(label) {
+  if (label === '新建课程') {
+    courseEditor.id = null
+    courseEditor.resetKey += 1
+  }
+  active.value = label
+}
+function createCourse() {
+  courseEditor.id = null
+  courseEditor.resetKey += 1
+  active.value = '新建课程'
+}
+function editCourse(id) {
+  courseEditor.id = id
+  courseEditor.resetKey += 1
+  active.value = '新建课程'
+}
+function openLibrary(type) {
+  const target = { article:'文章管理', video:'视频管理', ppt:'PPT管理' }[type]
+  if (target) {
+    libraryOpen.value = true
+    coursesOpen.value = true
+    active.value = target
+  }
+}
 function logout() { clearSession(); router.replace('/login') }
 </script>
 
@@ -84,6 +111,8 @@ function logout() { clearSession(); router.replace('/login') }
         <ArticleManagement v-else-if="active === '文章管理'" />
         <PptManagement v-else-if="active === 'PPT管理'" />
         <VideoManagement v-else-if="active === '视频管理'" />
+        <CourseManagement v-else-if="active === '课程列表' || active === '课程管理'" @create-course="createCourse" @edit-course="editCourse" />
+        <CourseCreate v-else-if="active === '新建课程'" :edit-course-id="courseEditor.id" :reset-key="courseEditor.resetKey" @open-library="openLibrary" />
         <div v-else class="empty-module"></div>
       </div>
     </section>

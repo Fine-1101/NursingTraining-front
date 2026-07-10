@@ -21,11 +21,11 @@ export const getVideos = (params = {}) => request(`${ROOT}${queryString(params)}
 export const getVideoOverview = () => request(`${ROOT}/overview`).then(unwrap)
 export const getVideo = (id) => request(`${ROOT}/${id}`).then(unwrap)
 export const getVideoPlayUrl = (id) => request(`${ROOT}/${id}/play-url`).then(unwrap)
-export const createVideo = (payload) => request(ROOT, { method: 'POST', body: JSON.stringify(payload) }).then(unwrap)
-export const updateVideo = (id, payload) => request(`${ROOT}/${id}`, { method: 'PUT', body: JSON.stringify(payload) }).then(unwrap)
-export const updateVideoStatus = (id, status) => request(`${ROOT}/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }).then(unwrap)
-export const deleteVideo = (id) => request(`${ROOT}/${id}`, { method: 'DELETE' }).then(unwrap)
-export const deleteVideos = (ids) => request(`${ROOT}/batch`, { method: 'DELETE', body: JSON.stringify({ ids }) }).then(unwrap)
+export const createVideo = (payload) => request(ROOT, { method:'POST', body:JSON.stringify(payload) }).then(unwrap)
+export const updateVideo = (id, payload) => request(`${ROOT}/${id}`, { method:'PUT', body:JSON.stringify(payload) }).then(unwrap)
+export const updateVideoStatus = (id, status) => request(`${ROOT}/${id}/status`, { method:'PATCH', body:JSON.stringify({ status }) }).then(unwrap)
+export const deleteVideo = (id) => request(`${ROOT}/${id}`, { method:'DELETE' }).then(unwrap)
+export const deleteVideos = (ids) => request(`${ROOT}/batch`, { method:'DELETE', body:JSON.stringify({ ids }) }).then(unwrap)
 
 export async function uploadVideoAsset(file, uploadType) {
   return uploadFile(file, uploadType)
