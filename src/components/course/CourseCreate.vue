@@ -16,6 +16,7 @@ const props = defineProps({
   resetKey: { type:Number, default:0 },
 })
 const STORAGE_KEY = 'nursing:create-course:id'
+const BASIC_CACHE_KEY = 'nursing:create-course:basic-cache'
 
 const step = ref(1)
 const courseId = ref(Number(props.editCourseId) || Number(localStorage.getItem(STORAGE_KEY)) || null)
@@ -65,7 +66,7 @@ const stepItems = computed(() => [
 
 function toast(text, type='success') { message.value={ text, type }; window.setTimeout(() => { message.value=null }, 2800) }
 function number(value) { return Number(value || 0).toLocaleString('zh-CN') }
-function dateInput(value) { if (!value) return ''; const d = new Date(value); return Number.isNaN(d.getTime()) ? String(value).slice(0, 10) : d.toISOString().slice(0, 10) }
+function dateInput(value) { if (!value) return ''; return String(value).slice(0, 10) }
 function toDateTime(value) { return value ? `${value}T00:00:00+08:00` : null }
 function flattenCategories(list = [], prefix = '') {
   return list.flatMap(item => {
@@ -173,6 +174,9 @@ async function restoreCourse() {
     fillCourse(data)
     step.value = Math.min(Math.max(data.currentStep || 2, 1), 3)
   } catch (error) {
+    // 课程不存在时，清理残留的过期 ID 和缓存，避免重复报错
+    syncStoredId(null)
+    localStorage.removeItem(BASIC_CACHE_KEY)
     toast(error.message, 'error')
   } finally {
     loading.value = false
@@ -191,6 +195,12 @@ function fillCourse(data = {}) {
     startAt:dateInput(data.startAt),
     departments:(data.departments || []).map(item => ({ departmentId:item.departmentId || item.id, required:Boolean(item.required) })),
   })
+  // 将讲师信息放入 instructors 列表，使 selectedInstructor 计算属性能正确显示
+  if (data.instructorId && data.instructorName) {
+    instructors.value = [{ id:data.instructorId, realName:data.instructorName, username:'', departmentName:data.instructorDepartmentName||'' }]
+  } else {
+    instructors.value = []
+  }
   chapters.value = (data.chapters || []).map(chapter => ({ ...chapter, points:chapter.points || [] }))
   activeChapterId.value = chapters.value[0]?.id || null
   courseStatus.value = data.status || 'DRAFT'
@@ -309,6 +319,7 @@ async function saveBasic() {
     await ensureDepartmentsLoaded()
     const data = courseId.value ? await updateCourseBasic(courseId.value, basicPayload()) : await createCourse(basicPayload())
     syncStoredId(data.courseId || courseId.value)
+    localStorage.removeItem(BASIC_CACHE_KEY)   // 数据已存后端，清除本地缓存
     step.value = 2
     await refreshCourse()
     toast('基础信息已保存')
@@ -576,8 +587,10 @@ function cancelDraft() {
 
 function resetAll() {
   syncStoredId(null)
+  localStorage.removeItem(BASIC_CACHE_KEY)
   step.value = 1
   Object.assign(basic, { title:'', summary:'', learningObjective:'', categoryId:'', coverUrl:'', tagIds:[], instructorId:'', startAt:'', departments:[] })
+  instructors.value = []
   chapters.value = []
   activeChapterId.value = null
   draggingChapterId.value = null
@@ -589,9 +602,40 @@ function resetAll() {
   resetPoint()
 }
 
+// ---- 本地表单缓存：支持未提交数据的恢复 ----
+function cacheBasic() {
+  try {
+    const instr = selectedInstructor.value
+    const snap = { title:basic.title, summary:basic.summary, learningObjective:basic.learningObjective, categoryId:basic.categoryId, coverUrl:basic.coverUrl, tagIds:[...basic.tagIds], instructorId:basic.instructorId, instructorName:instr?.realName||'', instructorUsername:instr?.username||'', instructorDept:instr?.departmentName||'', startAt:basic.startAt }
+    const has = snap.title || snap.summary || snap.categoryId || snap.coverUrl || snap.instructorId
+    if (has) localStorage.setItem(BASIC_CACHE_KEY, JSON.stringify(snap))
+    else localStorage.removeItem(BASIC_CACHE_KEY)
+  } catch { /* quota */ }
+}
+function restoreBasicCache() {
+  try {
+    const raw = localStorage.getItem(BASIC_CACHE_KEY)
+    if (!raw) return false
+    const c = JSON.parse(raw)
+    if (!c || (!c.title && !c.summary && !c.categoryId && !c.coverUrl && !c.instructorId)) return false
+    Object.assign(basic, { title:c.title||'', summary:c.summary||'', learningObjective:c.learningObjective||'', categoryId:c.categoryId||'', coverUrl:c.coverUrl||'', tagIds:[...(c.tagIds||[])], instructorId:c.instructorId||'', startAt:c.startAt||'' })
+    // 恢复讲师显示信息
+    if (c.instructorId && (c.instructorName || c.instructorUsername)) {
+      instructors.value = [{ id:c.instructorId, realName:c.instructorName||'', username:c.instructorUsername||'', departmentName:c.instructorDept||'' }]
+    } else {
+      instructors.value = []
+    }
+    return true
+  } catch { return false }
+}
+
 onMounted(async () => {
   await loadOptions()
-  await restoreCourse()
+  if (courseId.value) {
+    await restoreCourse()          // 恢复后端草稿；若失败会自动清理
+  } else if (!props.editCourseId) {
+    restoreBasicCache()            // 无后端草稿时恢复本地缓存
+  }
 })
 
 watch(() => props.resetKey, async () => {
@@ -599,9 +643,21 @@ watch(() => props.resetKey, async () => {
     syncStoredId(props.editCourseId)
     await restoreCourse()
   } else {
-    resetAll()
+    const storedId = Number(localStorage.getItem(STORAGE_KEY)) || null
+    if (storedId) {
+      courseId.value = storedId
+      await restoreCourse()        // 恢复后端草稿；若失败会自动清理并回退到空白
+    } else {
+      resetAll()
+      restoreBasicCache()          // 无后端草稿时恢复本地缓存
+    }
   }
 })
+
+// 监听 basic 变化，自动缓存（仅在非编辑模式时）
+watch(() => ({ ...basic, tagIds:[...basic.tagIds] }), () => {
+  if (!props.editCourseId) cacheBasic()
+}, { deep: true })
 </script>
 
 <template>
@@ -746,9 +802,9 @@ watch(() => props.resetKey, async () => {
       <div class="dialog mini-dialog">
         <header><h2>选择讲师</h2><button @click="instructorPicker.open=false">×</button></header>
         <div class="mini-body">
-          <div class="mini-search"><input v-model="instructorKeyword" placeholder="输入讲师姓名或账号" autofocus @keyup.enter="searchInstructors" /><button :disabled="instructorPicker.loading" @click="searchInstructors">{{ instructorPicker.loading ? '查询中...' : '查询' }}</button></div>
+          <div class="mini-search"><input v-model="instructorKeyword" placeholder="输入讲师姓名" autofocus @keyup.enter="searchInstructors" /><button :disabled="instructorPicker.loading" @click="searchInstructors">{{ instructorPicker.loading ? '查询中...' : '查询' }}</button></div>
           <div class="instructor-list">
-            <button v-for="item in instructors" :key="item.id" :class="{ active:Number(item.id) === Number(basic.instructorId) }" @click="selectInstructor(item)"><strong>{{ item.realName || item.username }}</strong><span>{{ item.username }}{{ item.departmentName ? ` · ${item.departmentName}` : '' }}</span></button>
+            <button v-for="item in instructors" :key="item.id" :class="{ active:Number(item.id) === Number(basic.instructorId) }" @click="selectInstructor(item)"><strong>{{ item.realName || item.username }}</strong><span>{{ item.departmentName || '' }}</span></button>
             <p v-if="!instructors.length && !instructorPicker.loading" class="empty">暂无匹配讲师</p>
           </div>
         </div>

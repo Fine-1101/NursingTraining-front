@@ -7,6 +7,7 @@ export const UPLOAD_TYPES = Object.freeze({
   VIDEO_FILE: 'VIDEO_FILE',
   VIDEO_COVER: 'VIDEO_COVER',
   COURSE_COVER: 'COURSE_COVER',
+  STUDENT_AVATAR: 'STUDENT_AVATAR',
 })
 
 export async function uploadFile(file, uploadType) {

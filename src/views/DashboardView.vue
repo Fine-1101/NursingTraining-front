@@ -10,6 +10,8 @@ import PptManagement from '@/components/ppt/PptManagement.vue'
 import VideoManagement from '@/components/video/VideoManagement.vue'
 import CourseCreate from '@/components/course/CourseCreate.vue'
 import CourseManagement from '@/components/course/CourseManagement.vue'
+import HomeDashboard from '@/components/dashboard/HomeDashboard.vue'
+import SystemSettings from '@/components/settings/SystemSettings.vue'
 import { fetchCurrentUser } from '@/services/api'
 import { clearSession, getStoredUser, setStoredUser } from '@/services/auth'
 
@@ -25,11 +27,10 @@ const courseEditor = reactive({ id:null, resetKey:0 })
 const displayName = computed(() => user.value?.name || user.value?.username || '护理管理员')
 const displayEmail = computed(() => user.value?.email || 'admin@nursing.com')
 const avatar = computed(() => user.value?.avatar || '')
+const courseMenuActive = computed(() => ['新建课程', '课程列表', '文章管理', '视频管理', 'PPT管理'].includes(active.value))
 
 const mainItems = [
   { label: '首页面板', icon: 'home' },
-  { label: '系统设置', icon: 'settings' },
-  { label: '培训学习', icon: 'book' },
   { label: '类别管理', icon: 'category' },
   { label: '标签管理', icon: 'tag' },
 ]
@@ -64,6 +65,12 @@ function openLibrary(type) {
     active.value = target
   }
 }
+function navigateDashboard(label) {
+  if (!label) return
+  if (label === '新建课程') createCourse()
+  else if (label === '学员管理') select('系统设置')
+  else select(label)
+}
 function logout() { clearSession(); router.replace('/login') }
 </script>
 
@@ -75,7 +82,7 @@ function logout() { clearSession(); router.replace('/login') }
         <button v-for="item in mainItems" :key="item.label" :class="{ active: active === item.label }" :title="collapsed ? item.label : ''" @click="select(item.label)">
           <AppIcon :name="item.icon" :size="24" /><span>{{ item.label }}</span>
         </button>
-        <button :class="{ active: active === '课程管理' }" title="课程管理" @click="coursesOpen = !coursesOpen; select('课程管理')">
+        <button :class="{ active: courseMenuActive }" title="课程管理" @click="coursesOpen = !coursesOpen">
           <AppIcon name="course" :size="24" /><span>课程管理</span><AppIcon class="arrow" name="chevron" :class="{ open: coursesOpen }" :size="17" />
         </button>
         <div v-show="coursesOpen && !collapsed" class="sub-menu">
@@ -86,6 +93,9 @@ function logout() { clearSession(); router.replace('/login') }
             <button @click="select('文章管理')">文章管理</button><button @click="select('视频管理')">视频管理</button><button @click="select('PPT管理')">PPT管理</button>
           </div>
         </div>
+        <button :class="{ active: active === '系统设置' }" :title="collapsed ? '系统设置' : ''" @click="select('系统设置')">
+          <AppIcon name="settings" :size="24" /><span>系统设置</span>
+        </button>
       </nav>
       <div class="side-user">
         <span class="avatar"><img v-if="avatar" :src="avatar" alt="" /><AppIcon v-else name="user" :size="25" /></span>
@@ -106,7 +116,9 @@ function logout() { clearSession(); router.replace('/login') }
         </div>
       </header>
       <div class="content-area">
-        <CategoryManagement v-if="active === '类别管理'" />
+        <HomeDashboard v-if="active === '首页面板'" @navigate="navigateDashboard" />
+        <SystemSettings v-else-if="active === '系统设置'" />
+        <CategoryManagement v-else-if="active === '类别管理'" />
         <TagManagement v-else-if="active === '标签管理'" />
         <ArticleManagement v-else-if="active === '文章管理'" />
         <PptManagement v-else-if="active === 'PPT管理'" />
