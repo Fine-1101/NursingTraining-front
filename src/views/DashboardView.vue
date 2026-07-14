@@ -12,6 +12,7 @@ import CourseCreate from '@/components/course/CourseCreate.vue'
 import CourseManagement from '@/components/course/CourseManagement.vue'
 import HomeDashboard from '@/components/dashboard/HomeDashboard.vue'
 import SystemSettings from '@/components/settings/SystemSettings.vue'
+import AssessmentManagement from '@/components/assessment/AssessmentManagement.vue'
 import { fetchCurrentUser } from '@/services/api'
 import { clearSession, getStoredUser, setStoredUser } from '@/services/auth'
 
@@ -19,6 +20,7 @@ const router = useRouter()
 const collapsed = ref(false)
 const coursesOpen = ref(true)
 const libraryOpen = ref(true)
+const assessmentOpen = ref(true)
 const active = ref('首页面板')
 const user = ref(getStoredUser() || {})
 const profileOpen = ref(false)
@@ -27,7 +29,8 @@ const courseEditor = reactive({ id:null, resetKey:0 })
 const displayName = computed(() => user.value?.name || user.value?.username || '护理管理员')
 const displayEmail = computed(() => user.value?.email || 'admin@nursing.com')
 const avatar = computed(() => user.value?.avatar || '')
-const courseMenuActive = computed(() => ['新建课程', '课程列表', '文章管理', '视频管理', 'PPT管理'].includes(active.value))
+const assessmentMenuActive = computed(() => ['题库管理', '考核发布', '成绩管理'].includes(active.value))
+const courseMenuActive = computed(() => ['新建课程', '课程列表', '文章管理', '视频管理', 'PPT管理'].includes(active.value) || assessmentMenuActive.value)
 
 const mainItems = [
   { label: '首页面板', icon: 'home' },
@@ -92,6 +95,10 @@ function logout() { clearSession(); router.replace('/login') }
           <div v-show="libraryOpen" class="library-list">
             <button @click="select('文章管理')">文章管理</button><button @click="select('视频管理')">视频管理</button><button @click="select('PPT管理')">PPT管理</button>
           </div>
+          <button class="library-toggle" @click="assessmentOpen = !assessmentOpen"><span>考核管理</span><AppIcon name="chevron" :class="{ open: assessmentOpen }" :size="15" /></button>
+          <div v-show="assessmentOpen" class="library-list">
+            <button :class="{ activeSub: active === '题库管理' }" @click="select('题库管理')">题库管理</button><button :class="{ activeSub: active === '考核发布' }" @click="select('考核发布')">考核发布</button><button :class="{ activeSub: active === '成绩管理' }" @click="select('成绩管理')">成绩管理</button>
+          </div>
         </div>
         <button :class="{ active: active === '系统设置' }" :title="collapsed ? '系统设置' : ''" @click="select('系统设置')">
           <AppIcon name="settings" :size="24" /><span>系统设置</span>
@@ -123,6 +130,7 @@ function logout() { clearSession(); router.replace('/login') }
         <ArticleManagement v-else-if="active === '文章管理'" />
         <PptManagement v-else-if="active === 'PPT管理'" />
         <VideoManagement v-else-if="active === '视频管理'" />
+        <AssessmentManagement v-else-if="assessmentMenuActive" :section="active" />
         <CourseManagement v-else-if="active === '课程列表' || active === '课程管理'" @create-course="createCourse" @edit-course="editCourse" />
         <CourseCreate v-else-if="active === '新建课程'" :edit-course-id="courseEditor.id" :reset-key="courseEditor.resetKey" @open-library="openLibrary" />
         <div v-else class="empty-module"></div>
