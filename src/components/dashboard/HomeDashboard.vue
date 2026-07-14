@@ -5,23 +5,26 @@ import { BarChart, LineChart, PieChart, ScatterChart } from 'echarts/charts'
 import { GraphicComponent, GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import AppIcon from '@/components/AppIcon.vue'
-import { getAdminDashboard } from '@/services/dashboard'
+import { getAdminDashboard, getDashboardCourseLearningTrend, getDashboardCourseOptions } from '@/services/dashboard'
 
 echarts.use([BarChart, LineChart, PieChart, ScatterChart, TooltipComponent, LegendComponent, GridComponent, GraphicComponent, CanvasRenderer])
 
 const emit = defineEmits(['navigate'])
 
 const ranges = [
-  { label:'近一周', value:'LAST_6_WEEKS' },
-  { label:'近一月', value:'LAST_6_MONTHS' },
-  { label:'近六月', value:'LAST_12_MONTHS' },
+  { label:'近一周', value:'LAST_1_WEEKS' },
+  { label:'近一月', value:'LAST_1_MONTHS' },
+  { label:'近六月', value:'LAST_6_MONTHS' },
 ]
 
-const range = ref('LAST_6_MONTHS')
+const range = ref('LAST_1_MONTHS')
 const selectedCourse = ref('')
 const loading = ref(false)
+const initializing = ref(true)
 const message = ref('')
 const dashboard = ref(null)
+const courseTrendData = ref(null)
+const allCourses = ref([])
 const statusChartRef = ref(null)
 const overviewChartRef = ref(null)
 const courseScatterRef = ref(null)
@@ -31,10 +34,36 @@ const charts = new Map()
 const summary = computed(() => dashboard.value?.summaryCards || {})
 const statusData = computed(() => dashboard.value?.learningStatusDistribution || { totalLearners:0, items:[] })
 const learningTrend = computed(() => dashboard.value?.learningTrend || { points:[] })
-const courseTrend = computed(() => dashboard.value?.courseLearningTrend || { courseTitle:'某门课程的学习人数 vs 完成率', points:[] })
+const baseCourseTrend = computed(() => courseTrendData.value || dashboard.value?.courseLearningTrend || { courseTitle:'某门课程的学习人数 vs 完成率', points:[] })
 const courseOptions = computed(() => {
-  const title = courseTrend.value.courseTitle || '某门课程'
-  return [{ id:title, title }]
+  const trend = baseCourseTrend.value || {}
+  const candidates = [
+    ...allCourses.value,
+    ...(Array.isArray(trend.courseOptions) ? trend.courseOptions : []),
+    ...(Array.isArray(trend.courses) ? trend.courses : []),
+    ...(Array.isArray(dashboard.value?.courseOptions) ? dashboard.value.courseOptions : []),
+    ...(Array.isArray(dashboard.value?.courses) ? dashboard.value.courses : []),
+  ]
+  const normalized = candidates.map((item, index) => {
+    const title = item.courseTitle || item.title || item.name || item.label
+    const id = item.courseId || item.id || item.value || `course-${index}`
+    return title ? { id:String(id), title, points:item.points } : null
+  }).filter(Boolean)
+  if (normalized.length) return normalized
+  const title = trend.courseTitle || '某门课程'
+  const id = trend.courseId || ''
+  return [{ id:String(id), title, points:trend.points || [] }]
+})
+const courseTrend = computed(() => {
+  const trend = baseCourseTrend.value || {}
+  const selected = String(selectedCourse.value || '')
+  const option = courseOptions.value.find(item => item.id === selected)
+  if (option?.points?.length) return { courseTitle:option.title, points:option.points }
+  return {
+    ...trend,
+    courseTitle:option?.title || trend.courseTitle || '某门课程',
+    points:trend.points || [],
+  }
 })
 const departments = computed(() => dashboard.value?.departmentCompletionRanking || [])
 const quickEntries = computed(() => dashboard.value?.quickEntries?.length ? dashboard.value.quickEntries : [
@@ -45,6 +74,21 @@ const quickEntries = computed(() => dashboard.value?.quickEntries?.length ? dash
 ])
 
 function number(value) { return Number(value || 0).toLocaleString('zh-CN') }
+function trendGranularity() {
+  if (range.value === 'LAST_1_WEEKS' || range.value === 'LAST_6_WEEKS') return 'DAY'
+  if (range.value === 'LAST_1_MONTHS' || range.value === 'LAST_12_MONTHS') return 'WEEK'
+  return 'MONTH'
+}
+function trendPointLabel(item) {
+  if (item.label) return item.label
+  if (item.date) return String(item.date).slice(5)
+  if (item.weekLabel) return item.weekLabel
+  if (item.weekStart && item.weekEnd) return `${String(item.weekStart).slice(5)}~${String(item.weekEnd).slice(5)}`
+  if (item.weekStart) return String(item.weekStart).slice(5)
+  if (item.month) return item.month
+  if (item.period) return item.period
+  return ''
+}
 function rateText(item) {
   if (!item || item.changeRate === null || item.changeRate === undefined) return ''
   const down = item.changeDirection === 'DOWN' || Number(item.changeRate) < 0
@@ -61,6 +105,16 @@ function navigate(entry) {
     USER_MANAGEMENT:'学员管理',
   }[entry.code]
   emit('navigate', target || entry.title)
+}
+function syncSelectedCourse() {
+  const options = courseOptions.value
+  if (!options.length) {
+    selectedCourse.value = ''
+    return
+  }
+  if (!options.some(item => item.id === selectedCourse.value)) {
+    selectedCourse.value = options[0].id
+  }
 }
 
 function chartOf(refEl) {
@@ -82,19 +136,20 @@ function renderStatusChart() {
     series:[{
       name:'学习进度分布',
       type:'pie',
-      radius:['46%', '72%'],
-      center:['36%', '52%'],
+      radius:['40%', '64%'],
+      center:['35%', '46%'],
       avoidLabelOverlap:false,
       padAngle:4,
       itemStyle:{ borderRadius:8, borderColor:'#fff', borderWidth:4 },
-      label:{ formatter:'{d}%', color:'#2f3833', fontSize:13 },
+      label:{ formatter:'{d}%', color:'#2f3833', fontSize:12 },
       data:items.map(item => ({ name:item.statusName, value:item.count })),
     }],
     graphic:[{
       type:'text',
       left:'28%',
-      top:'47%',
-      style:{ text:`${number(statusData.value.totalLearners)}\n总学员`, textAlign:'center', fill:'#1d2722', fontSize:24, fontWeight:700, lineHeight:30 },
+      top:'36%',
+      bounding:'raw',
+      style:{ text:`${number(statusData.value.totalLearners)}\n总学员`, textAlign:'center', textVerticalAlign:'middle', fill:'#1d2722', fontSize:20, fontWeight:700, lineHeight:24 },
     }],
   }, true)
 }
@@ -103,6 +158,7 @@ function renderOverviewChart() {
   if (!chart) return
   const points = learningTrend.value.points || []
   chart.setOption({
+    graphic:[],
     color:['#006b43', '#73c72c'],
     tooltip:{ trigger:'axis' },
     legend:{ top:8, data:['学员人数', '课程完成数'] },
@@ -119,25 +175,77 @@ function renderCourseScatter() {
   const chart = chartOf(courseScatterRef)
   if (!chart) return
   const points = courseTrend.value.points || []
-  const maxLearners = Math.max(...points.map(item => Number(item.learnerCount || 0)), 1)
+  if (!points.length) {
+    chart.setOption({
+      graphic:[{ type:'text', left:'center', top:'middle', style:{ text:'暂无课程学习趋势数据', fill:'#8b9690', fontSize:14 } }],
+      xAxis:[], yAxis:[], series:[],
+    }, true)
+    return
+  }
   chart.setOption({
-    color:['#006b43'],
+    graphic:[],
+    color:['#006b43', '#ff8a18'],
     tooltip:{
-      trigger:'item',
-      formatter:({ data }) => `${data[3]}<br/>学习人数：${number(data[0])}<br/>完成率：${data[1]}%`,
+      trigger:'axis',
+      axisPointer:{ type:'cross', crossStyle:{ color:'#8b9690' } },
+      formatter:items => {
+        const title = items?.[0]?.axisValue || ''
+        const lines = (items || []).map(item => {
+          const suffix = item.seriesName === '完成率' ? '%' : '人'
+          const value = item.seriesName === '完成率' ? Number(item.value || 0).toFixed(1) : number(item.value)
+          return `${item.marker}${item.seriesName}：${value}${suffix}`
+        })
+        return [title, ...lines].join('<br/>')
+      },
     },
-    grid:commonGrid({ right:48 }),
-    xAxis:{ type:'value', name:'学习人数', splitLine:{ lineStyle:{ color:'#e8ece9' } } },
-    yAxis:{ type:'value', name:'完成率', min:0, max:100, axisLabel:{ formatter:'{value}%' }, splitLine:{ lineStyle:{ color:'#e8ece9' } } },
-    series:[{
-      name:'学习人数 vs 完成率',
-      type:'scatter',
-      data:points.map(item => [item.learnerCount, item.completionRate, item.completedCourseCount || item.learnerCount, item.label]),
-      symbolSize:data => Math.max(12, Math.min(42, Number(data[2] || data[0]) / maxLearners * 36)),
-      itemStyle:{ color:'#007a46', opacity:.82, shadowBlur:8, shadowColor:'rgba(0,106,67,.22)' },
-      emphasis:{ focus:'series', itemStyle:{ opacity:1 } },
-      animationDelay:idx => idx * 80,
+    legend:{ top:8, data:['学习人数', '完成率'] },
+    grid:commonGrid({ top:52, right:54, bottom:38 }),
+    xAxis:[{
+      type:'category',
+      data:points.map(trendPointLabel),
+      axisTick:{ alignWithLabel:true },
+      axisLabel:{ color:'#5f6964', interval:0 },
     }],
+    yAxis:[
+      {
+        type:'value',
+        name:'学习人数',
+        axisLabel:{ color:'#5f6964' },
+        splitLine:{ lineStyle:{ color:'#e8ece9' } },
+      },
+      {
+        type:'value',
+        name:'完成率',
+        min:0,
+        max:100,
+        axisLabel:{ formatter:'{value}%', color:'#5f6964' },
+        splitLine:{ show:false },
+      },
+    ],
+    series:[
+      {
+        name:'学习人数',
+        type:'bar',
+        data:points.map(item => Number(item.learnerCount || 0)),
+        barWidth:18,
+        itemStyle:{ color:'#006b43', borderRadius:[6,6,0,0] },
+        emphasis:{ focus:'series' },
+        animationDelay:idx => idx * 45,
+      },
+      {
+        name:'完成率',
+        type:'line',
+        yAxisIndex:1,
+        smooth:true,
+        symbol:'circle',
+        symbolSize:8,
+        data:points.map(item => Number(item.completionRate || 0)),
+        lineStyle:{ width:3, color:'#ff8a18' },
+        itemStyle:{ color:'#ff8a18' },
+        areaStyle:{ color:'rgba(255,138,24,.08)' },
+        animationDelay:idx => idx * 45 + 120,
+      },
+    ],
   }, true)
 }
 function renderDeptBar() {
@@ -146,16 +254,54 @@ function renderDeptBar() {
   const rows = departments.value || []
   chart.setOption({
     color:['#5470c6', '#91cc75'],
-    tooltip:{ trigger:'axis', axisPointer:{ type:'shadow' } },
-    legend:{ top:10, data:['应学人数', '已完成人数'] },
-    grid:commonGrid({ top:54, left:30, right:18, bottom:56 }),
-    xAxis:{ type:'category', data:rows.map(item => item.departmentName), axisLabel:{ interval:0, rotate:35 } },
-    yAxis:{ type:'value', splitLine:{ lineStyle:{ color:'#e8ece9' } } },
+    tooltip:{
+      trigger:'axis',
+      axisPointer:{ type:'shadow' },
+      formatter:items => {
+        const name = items?.[0]?.axisValue || ''
+        const lines = (items || []).map(item => `${item.marker}${item.seriesName}：${number(item.value)}`)
+        return [name, ...lines].join('<br/>')
+      },
+    },
+    legend:{ top:8, right:8, data:['应学人数', '已完成人数'] },
+    grid:commonGrid({ top:58, left:64, right:24, bottom:28 }),
+    xAxis:{
+      type:'value',
+      axisLabel:{ color:'#5f6964' },
+      splitLine:{ lineStyle:{ color:'#e8ece9' } },
+    },
+    yAxis:{
+      type:'category',
+      inverse:true,
+      data:rows.map(item => item.departmentName),
+      axisTick:{ show:false },
+      axisLabel:{ color:'#5f6964' },
+    },
     series:[
-      { name:'应学人数', type:'bar', data:rows.map(item => item.learnerCount), barWidth:12, itemStyle:{ borderRadius:[5,5,0,0] }, animationDelay:idx => idx * 90 },
-      { name:'已完成人数', type:'bar', data:rows.map(item => item.completedLearnerCount), barWidth:12, itemStyle:{ borderRadius:[5,5,0,0] }, animationDelay:idx => idx * 90 + 40 },
+      {
+        name:'应学人数',
+        type:'bar',
+        data:rows.map(item => Number(item.learnerCount || 0)),
+        barWidth:10,
+        barGap:'35%',
+        itemStyle:{ borderRadius:[0,6,6,0] },
+        emphasis:{ focus:'series' },
+        animationDelay:idx => idx * 10,
+        animationDelayUpdate:idx => idx * 5,
+      },
+      {
+        name:'已完成人数',
+        type:'bar',
+        data:rows.map(item => Number(item.completedLearnerCount || 0)),
+        barWidth:10,
+        itemStyle:{ borderRadius:[0,6,6,0] },
+        emphasis:{ focus:'series' },
+        animationDelay:idx => idx * 10 + 100,
+        animationDelayUpdate:idx => idx * 5 + 100,
+      },
     ],
     animationEasing:'elasticOut',
+    animationEasingUpdate:'elasticOut',
   }, true)
 }
 function renderCharts() {
@@ -170,20 +316,74 @@ async function loadDashboard() {
   loading.value = true
   message.value = ''
   try {
-    dashboard.value = await getAdminDashboard({ range:range.value, departmentLimit:10 })
-    selectedCourse.value = dashboard.value?.courseLearningTrend?.courseTitle || ''
-    renderCharts()
+    dashboard.value = await getAdminDashboard({ range:range.value, granularity:trendGranularity(), departmentLimit:10 })
+    if (!courseTrendData.value && dashboard.value?.courseLearningTrend) courseTrendData.value = dashboard.value.courseLearningTrend
+    syncSelectedCourse()
+    renderStatusChart()
+    renderOverviewChart()
+    renderDeptBar()
   } catch (error) {
     message.value = error.message
   } finally {
     loading.value = false
   }
 }
+async function loadCourseTrend() {
+  if (!selectedCourse.value) {
+    courseTrendData.value = null
+    renderCourseScatter()
+    return
+  }
+  try {
+    courseTrendData.value = await getDashboardCourseLearningTrend({ range:range.value, granularity:trendGranularity(), courseId:selectedCourse.value })
+  } catch (error) {
+    message.value = error.message
+    courseTrendData.value = null
+  } finally {
+    renderCourseScatter()
+  }
+}
+async function loadCourseOptions() {
+  try {
+    const data = await getDashboardCourseOptions()
+    const records = Array.isArray(data)
+      ? data
+      : (Array.isArray(data?.records)
+        ? data.records
+        : (data && typeof data === 'object'
+          ? Object.entries(data).map(([id, title]) => ({ id, title }))
+          : []))
+    allCourses.value = records
+      .map(item => ({ id:item.id || item.courseId, title:item.title || item.courseTitle || item.name }))
+      .filter(item => item.id && item.title)
+    syncSelectedCourse()
+  } catch (error) {
+    message.value = error.message
+  }
+}
 function resizeCharts() { charts.forEach(chart => chart.resize()) }
 
-watch(range, loadDashboard)
-onMounted(() => {
-  loadDashboard()
+watch(range, async () => {
+  await loadDashboard()
+  await loadCourseTrend()
+})
+watch(courseOptions, () => {
+  syncSelectedCourse()
+  renderCourseScatter()
+})
+watch(selectedCourse, (value, oldValue) => {
+  if (value === oldValue) return
+  if (initializing.value) {
+    renderCourseScatter()
+    return
+  }
+  loadCourseTrend()
+})
+onMounted(async () => {
+  await loadCourseOptions()
+  await loadDashboard()
+  await loadCourseTrend()
+  initializing.value = false
   window.addEventListener('resize', resizeCharts)
 })
 onBeforeUnmount(() => {
@@ -257,7 +457,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.home-dashboard{min-height:calc(100vh - 79px);padding:20px;background:#f7f9f8;color:#17231d}.dashboard-shell{position:relative;display:grid;grid-template-columns:1fr 1.05fr 390px;grid-template-rows:128px 370px 288px 126px;gap:16px;max-width:1500px;margin:0 auto}.panel{background:#fff;border:1px solid #e6ebe8;border-radius:12px;box-shadow:0 4px 14px rgba(17,62,42,.045)}.summary-band{grid-column:1 / 3;display:grid;grid-template-columns:1fr 1fr auto;align-items:center;padding:22px 30px}.summary-band article{display:flex;align-items:center;gap:22px;min-width:0}.summary-band article+article{padding-left:35px;border-left:1px solid #e6ebe8}.summary-icon{width:66px;height:66px;display:grid;place-items:center;color:#fff;background:linear-gradient(135deg,#109456,#00653f);border-radius:50%}.summary-band small,.summary-band strong,.summary-band em{display:block}.summary-band small{color:#343f39;font-size:15px}.summary-band strong{margin:8px 0 6px;font-size:30px}.summary-band em{color:#10834e;font-style:normal}.summary-band em.down{color:#d84d4d}.range-select{display:flex;align-items:center;gap:10px;color:#6d7772;font-size:13px}.panel select{height:34px;padding:0 12px;border:1px solid #dbe2df;border-radius:18px;background:#fff;outline:none}.status-panel{grid-column:1;grid-row:2 / 4;padding:18px 16px}.status-panel>h2,.quick-panel h2{margin:0 0 14px;font-size:19px}.chart-card{height:calc(100% - 34px);padding:16px;border:1px solid #edf1ef;border-radius:10px}.chart-card header,.trend-panel header,.dept-panel header,.overview-panel header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.chart-card h3,.trend-panel h2,.dept-panel h2,.overview-panel h2{margin:0;font-size:17px}.trend-panel p,.dept-panel p{margin:8px 0 0;color:#5c6761}.trend-panel{grid-column:2;grid-row:2;padding:22px}.dept-panel{grid-column:3;grid-row:1 / 4;padding:22px}.overview-panel{grid-column:1;grid-row:4;padding:18px}.quick-panel{grid-column:2 / 4;grid-row:4;padding:18px 22px}.chart{width:100%;height:calc(100% - 36px);min-height:220px}.chart.large{height:285px}.chart.tall{height:590px}.quick-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}.quick-grid button{height:68px;display:flex;align-items:center;justify-content:center;gap:16px;color:#213128;background:#fff;border:1px solid #e4ebe7;border-radius:10px;cursor:pointer;font-weight:700}.quick-grid button:hover{color:#0b7a48;border-color:#b9ddc7;background:#f5fbf7}.quick-grid svg{color:#45a829}.error{position:absolute;z-index:5;left:50%;top:10px;transform:translateX(-50%);padding:10px 18px;color:#fff;background:#c94f4f;border-radius:8px}
+.home-dashboard{min-height:calc(100vh - 79px);padding:20px;background:#f7f9f8;color:#17231d}.dashboard-shell{position:relative;display:grid;grid-template-columns:1fr 1.05fr 390px;grid-template-rows:128px 370px 288px 126px;gap:16px;max-width:1500px;margin:0 auto}.panel{background:#fff;border:1px solid #e6ebe8;border-radius:12px;box-shadow:0 4px 14px rgba(17,62,42,.045)}.summary-band{grid-column:1 / 3;display:grid;grid-template-columns:1fr 1fr auto;align-items:center;padding:22px 30px}.summary-band article{display:flex;align-items:center;gap:22px;min-width:0}.summary-band article+article{padding-left:35px;border-left:1px solid #e6ebe8}.summary-icon{width:66px;height:66px;display:grid;place-items:center;color:#fff;background:linear-gradient(135deg,#109456,#00653f);border-radius:50%}.summary-band small,.summary-band strong,.summary-band em{display:block}.summary-band small{color:#343f39;font-size:15px}.summary-band strong{margin:8px 0 6px;font-size:30px}.summary-band em{color:#10834e;font-style:normal}.summary-band em.down{color:#d84d4d}.range-select{display:flex;align-items:center;gap:10px;color:#6d7772;font-size:13px}.panel select{height:34px;padding:0 12px;border:1px solid #dbe2df;border-radius:18px;background:#fff;outline:none}.status-panel{grid-column:1;grid-row:2 / 4;padding:18px 18px}.status-panel>h2,.quick-panel h2{margin:0 0 14px;font-size:19px}.chart-card{height:calc(100% - 34px);padding:16px;border:1px solid #edf1ef;border-radius:10px}.chart-card header,.trend-panel header,.dept-panel header,.overview-panel header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.chart-card h3,.trend-panel h2,.dept-panel h2,.overview-panel h2{margin:0;font-size:17px}.trend-panel p,.dept-panel p{margin:8px 0 0;color:#5c6761}.trend-panel{grid-column:2;grid-row:2;padding:22px}.dept-panel{grid-column:3;grid-row:1 / 4;padding:22px}.overview-panel{grid-column:1;grid-row:4;padding:18px}.quick-panel{grid-column:2 / 4;grid-row:4;padding:18px 22px}.chart{width:100%;height:calc(100% - 36px);min-height:220px}.chart.large{height:285px}.chart.tall{height:590px}.quick-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}.quick-grid button{height:68px;display:flex;align-items:center;justify-content:center;gap:16px;color:#213128;background:#fff;border:1px solid #e4ebe7;border-radius:10px;cursor:pointer;font-weight:700}.quick-grid button:hover{color:#0b7a48;border-color:#b9ddc7;background:#f5fbf7}.quick-grid svg{color:#45a829}.error{position:absolute;z-index:5;left:50%;top:10px;transform:translateX(-50%);padding:10px 18px;color:#fff;background:#c94f4f;border-radius:8px}
 @media(max-width:1350px){.dashboard-shell{grid-template-columns:1fr 1fr;grid-template-rows:auto}.summary-band,.status-panel,.trend-panel,.dept-panel,.overview-panel,.quick-panel{grid-column:auto;grid-row:auto}.summary-band{grid-column:1 / -1}.dept-panel{grid-column:1 / -1}.chart.tall{height:360px}.quick-panel{grid-column:1 / -1}}@media(max-width:760px){.home-dashboard{padding:10px}.dashboard-shell{display:flex;flex-direction:column}.summary-band{grid-template-columns:1fr;gap:18px}.summary-band article+article{padding-left:0;border-left:0}.quick-grid{grid-template-columns:1fr 1fr}.chart,.chart.large,.chart.tall{height:280px}}
 .dashboard-shell{grid-template-rows:96px 260px 260px 96px}
 .summary-band{padding:16px 28px}

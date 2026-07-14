@@ -17,6 +17,8 @@ function queryString(params = {}) {
 }
 
 export const getAdminDashboard = (params = {}) => request(`${ROOT}${queryString(params)}`).then(unwrap)
+export const getDashboardCourseOptions = () => request(`${ROOT}/course-options`).then(unwrap)
+export const getDashboardCourseLearningTrend = (params = {}) => request(`${ROOT}/course-learning-trend${queryString(params)}`).then(unwrap)
 export const getDashboardSummary = () => request(`${ROOT}/summary`).then(unwrap)
 export const getLearningStatusDistribution = () => request(`${ROOT}/learning-status-distribution`).then(unwrap)
 export const getLearningTrend = (params = {}) => request(`${ROOT}/learning-trend${queryString(params)}`).then(unwrap)

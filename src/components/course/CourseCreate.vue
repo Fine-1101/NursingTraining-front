@@ -678,7 +678,7 @@ watch(() => ({ ...basic, tagIds:[...basic.tagIds] }), () => {
 
     <template v-else>
       <section v-if="step === 1" class="panel card basic-panel">
-        <header><h2>基础信息</h2><small>字段严格按照课程创建接口提交，图片中的学时、考核方式、适用对象已删除。</small></header>
+        <header><h2>基础信息</h2></header>
         <div class="basic-sketch">
           <div class="basic-left">
             <div class="top-row">

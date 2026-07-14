@@ -41,6 +41,15 @@ function isDescendant(candidateId, parentId) {
   }
   return false
 }
+function collectExpandableIds(nodes, result = []) {
+  nodes.forEach(node => {
+    if (node.children?.length) {
+      result.push(node.id)
+      collectExpandableIds(node.children, result)
+    }
+  })
+  return result
+}
 
 function toast(text, type = 'success') {
   message.value = { text, type }
@@ -53,7 +62,7 @@ async function loadTree() {
     const data = await getCategoryTree({ keyword: filters.keyword.trim(), status: filters.status, parentId: filters.parentId })
     roots.value = data?.categories || []
     total.value = data?.total || 0
-    if (filters.keyword || filters.status !== '') expanded.value = new Set(allNodes.value.map(item => item.id))
+    expanded.value = new Set(collectExpandableIds(roots.value))
   } catch (error) { toast(error.message, 'error') }
   finally { loading.value = false }
 }
