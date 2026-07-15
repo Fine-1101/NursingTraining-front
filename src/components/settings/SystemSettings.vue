@@ -8,7 +8,7 @@ import AppIcon from '@/components/AppIcon.vue'
 import {
   completeStudentCourseProgress, deleteStudent, getCurrentSettingsUser, getDepartmentDistribution,
   getSettingsDepartmentOptions, getStudent, getStudentCourseProgress, getStudents,
-  resetStudentCourseProgress, updateStudent, uploadStudentAvatar,
+  resetStudentCourseProgress, sendStudentCourseMessage, updateStudent, uploadStudentAvatar,
 } from '@/services/settings'
 
 echarts.use([BarChart, TooltipComponent, LegendComponent, GridComponent, CanvasRenderer])
@@ -31,6 +31,7 @@ const query = reactive({ keyword:'', departmentId:'', page:1, size:10 })
 const pager = reactive({ total:0, pages:1 })
 const form = reactive({ avatarUrl:'', avatarObjectKey:'', realName:'', username:'', phone:'', departmentId:'', status:'ENABLED' })
 const confirmBox = reactive({ open:false, title:'', content:'', action:null, loading:false })
+const messageDialog = reactive({ open:false, sending:false, studentId:null, studentName:'', courseId:null, courseTitle:'', progressPercent:0, content:'' })
 
 const currentPerson = computed(() => selectedStudent.value || admin.value || {})
 const isStudent = computed(() => Boolean(selectedStudent.value))
@@ -298,6 +299,35 @@ function resetCourse(item) {
     }
   })
 }
+function openCourseMessage(item) {
+  if (!selectedStudent.value || !item) return
+  Object.assign(messageDialog, {
+    open:true,
+    sending:false,
+    studentId:item.studentId || selectedStudent.value.studentId,
+    studentName:item.studentName || selectedStudent.value.realName || selectedStudent.value.username || '',
+    courseId:item.courseId,
+    courseTitle:item.courseTitle || '',
+    progressPercent:Number(item.progressPercent || 0),
+    content:'',
+  })
+  hoveredCourse.value = null
+}
+async function sendCourseMessage() {
+  const content = messageDialog.content.trim()
+  if (!content) return toast('请输入消息内容', 'error')
+  if (content.length > 1000) return toast('消息内容不能超过 1000 字', 'error')
+  messageDialog.sending = true
+  try {
+    await sendStudentCourseMessage(messageDialog.studentId, messageDialog.courseId, content)
+    messageDialog.open = false
+    toast('消息已发送')
+  } catch (error) {
+    toast(error.message, 'error')
+  } finally {
+    messageDialog.sending = false
+  }
+}
 function resizeChart() { chart.value?.resize() }
 
 onMounted(() => {
@@ -390,7 +420,7 @@ onBeforeUnmount(() => {
 
       <section class="chart-card card">
         <header>
-          <div><h2>{{ isStudent ? `${selectedStudent.realName}的课程进度` : '学员按科室分布' }}</h2><p>{{ isStudent ? '鼠标悬停课程柱可推满或清零进度' : `合计：${number(departmentDistribution?.total)} 人` }}</p></div>
+          <div><h2>{{ isStudent ? `${selectedStudent.realName}的课程进度` : '学员按科室分布' }}</h2><p>{{ isStudent ? '鼠标悬停课程柱可推满、清零或发送消息' : `合计：${number(departmentDistribution?.total)} 人` }}</p></div>
           <button v-if="isStudent" class="ghost" @click="clearSelected">返回科室分布</button>
         </header>
         <div class="chart-box" @mouseleave="hoveredCourse=null">
@@ -398,10 +428,30 @@ onBeforeUnmount(() => {
           <div v-if="hoveredCourse" class="progress-pop" :style="{ left:`${hoverPosition.left}px`, top:`${hoverPosition.top}px` }" @mouseenter.stop>
             <button @click="completeCourse(hoveredCourse)">推满</button>
             <button @click="resetCourse(hoveredCourse)">清零</button>
+            <button @click="openCourseMessage(hoveredCourse)">消息</button>
           </div>
         </div>
       </section>
     </main>
+
+    <div v-if="messageDialog.open" class="overlay">
+      <form class="confirm message-modal card" @submit.prevent="sendCourseMessage">
+        <header><h2>发送课程消息</h2><button type="button" @click="messageDialog.open=false">×</button></header>
+        <div class="message-body">
+          <div><span>学员</span><strong>{{ messageDialog.studentName }}</strong></div>
+          <div><span>课程</span><strong>{{ messageDialog.courseTitle }}</strong></div>
+          <label>消息内容
+            <textarea v-model="messageDialog.content" maxlength="1000" placeholder="请输入要发送给学员的消息内容..." autofocus></textarea>
+            <small>{{ messageDialog.content.trim().length }}/1000</small>
+          </label>
+          <p class="message-tip">发送成功表示消息已保存并尝试实时推送，不代表学员已经阅读。</p>
+        </div>
+        <footer>
+          <button type="button" class="cancel" @click="messageDialog.open=false">取消</button>
+          <button class="save" :disabled="messageDialog.sending || !messageDialog.content.trim()">{{ messageDialog.sending ? '发送中...' : '发送' }}</button>
+        </footer>
+      </form>
+    </div>
 
     <div v-if="confirmBox.open" class="overlay">
       <div class="confirm card">
@@ -414,6 +464,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.settings-page{min-height:calc(100vh - 79px);display:grid;grid-template-columns:350px 1fr;gap:16px;padding:18px;background:#f7f9f8;color:#202b25}.card{background:#fff;border:1px solid #e5ebe8;border-radius:12px;box-shadow:0 4px 14px rgba(17,62,42,.045)}.profile-card{min-height:760px;padding:20px}.profile-card h2,.student-list h2,.chart-card h2{margin:0;font-size:19px}.avatar-view,.avatar-edit{position:relative;width:132px;height:132px;display:grid;place-items:center;margin:28px auto 24px;border-radius:50%;overflow:hidden;background:#eef3f0;color:#0b7c49;font-size:42px;font-weight:700}.avatar-view img,.avatar-edit img{width:100%;height:100%;object-fit:cover}.avatar-edit input{position:absolute;inset:0;opacity:0;cursor:pointer}.avatar-edit b{position:absolute;inset:auto 0 0;padding:8px;color:#fff;background:rgba(0,0,0,.42);font-size:12px;text-align:center}.info-list>div,.info-row{display:grid;grid-template-columns:110px 1fr;gap:12px;padding:15px 8px;border-bottom:1px solid #eef1ef}.info-list span,.info-row span{color:#6f7974}.info-list strong,.info-row strong{font-weight:600}.edit-form label{display:block;margin-bottom:13px;color:#6f7974}.edit-form input,.edit-form select{width:100%;height:40px;margin-top:7px;padding:0 11px;border:1px solid #dbe2df;border-radius:8px;background:#fff}.profile-card footer{display:flex;gap:12px;margin-top:24px}.profile-card footer button{height:42px;display:flex;align-items:center;justify-content:center;gap:6px;padding:0 20px;border-radius:8px;cursor:pointer}.save{color:#fff;background:#007a46}.delete{color:#e03e3e;border:1px solid #f0caca;background:#fff}.delete.solid{color:#fff;background:#d84b4b}.cancel{color:#202b25;border:1px solid #d7ddda;background:#fff}.main-area{display:grid;grid-template-rows:auto 1fr;gap:16px}.student-list{padding:18px}.filters{display:grid;grid-template-columns:minmax(260px,1fr) 220px auto auto;gap:14px;align-items:center;margin:18px 0}.keyword{height:42px;display:flex;align-items:center;padding:0 12px;border:1px solid #dce2de;border-radius:8px}.keyword input{flex:1;border:0;outline:0}.filters label:not(.keyword){display:flex;align-items:center;gap:8px;white-space:nowrap}.filters select{height:40px;min-width:135px;padding:0 10px;border:1px solid #dce2de;border-radius:8px;background:#fff}.filters button{height:40px;padding:0 22px;border-radius:8px;cursor:pointer}.search-btn{color:#fff;background:#007a46}.reset-btn,.ghost{border:1px solid #d7ddda;background:#fff}.table-wrap{min-height:350px;overflow:auto;border:1px solid #edf1ef;border-radius:8px}table{width:100%;min-width:820px;border-collapse:collapse;font-size:14px}th{height:42px;background:#fbfcfb;text-align:left}td{height:48px;border-top:1px solid #edf1ef;color:#3f4944}th:first-child,td:first-child{padding-left:18px}tbody tr{cursor:pointer}tbody tr:hover,tbody tr.selected{background:#f3fbf5}.student-cell{display:flex;align-items:center;gap:10px}.mini-avatar{width:28px;height:28px;display:grid;place-items:center;overflow:hidden;border-radius:50%;background:#e8f2ec;color:#0b7c49;font-size:12px}.mini-avatar img{width:100%;height:100%;object-fit:cover}.progress-cell{display:flex;align-items:center;gap:12px}.progress-cell i{width:170px;height:8px;overflow:hidden;background:#eef0f0;border-radius:999px}.progress-cell b{display:block;height:100%;border-radius:999px}.progress-cell .good{background:#078844}.progress-cell .warn,.progress-cell .low{background:#ff7b16}.pager{height:52px;display:flex;align-items:center;gap:16px;padding:0 10px}.pager select{height:34px;border:1px solid #dfe4e1;border-radius:7px;background:#fff}.pager nav{display:flex;align-items:center;gap:7px;margin-left:auto}.pager nav button{width:32px;height:32px;border:1px solid #dfe4e1;border-radius:7px;background:#fff;cursor:pointer}.pager nav button.active{color:#fff;background:#087640}.pager nav button:disabled{opacity:.45}.pager nav i{font-style:normal}.chart-card{padding:18px}.chart-card>header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px}.chart-card p{margin:6px 0 0;color:#66716c}.chart-card .ghost{height:36px;padding:0 14px;border-radius:8px;cursor:pointer}.chart-box{position:relative;height:300px}.chart{width:100%;height:100%}.progress-pop{position:absolute;z-index:4;display:flex;gap:6px;padding:6px;background:#fff;border:1px solid #dfe6e2;border-radius:8px;box-shadow:0 10px 24px rgba(0,40,20,.14)}.progress-pop button{height:28px;padding:0 10px;border-radius:6px;cursor:pointer}.progress-pop button:first-child{color:#fff;background:#087640}.progress-pop button:last-child{color:#d84343;background:#fff;border:1px solid #efc8c8}.state{min-height:240px;display:flex;align-items:center;justify-content:center;gap:10px;color:#87908b}.state.small{min-height:220px}.loader{width:22px;height:22px;border:2px solid #d9e4dd;border-top-color:#26905a;border-radius:50%;animation:spin .7s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.toast{position:fixed;z-index:60;top:92px;left:50%;transform:translateX(-50%);padding:11px 20px;color:#fff;background:#238b57;border-radius:8px}.toast.error{background:#ce4e4e}.overlay{position:fixed;z-index:50;inset:0;display:grid;place-items:center;background:rgba(11,31,21,.42);backdrop-filter:blur(2px)}.confirm{width:min(450px,94vw);overflow:hidden}.confirm header{height:58px;display:flex;align-items:center;justify-content:space-between;padding:0 20px;border-bottom:1px solid #edf1ef}.confirm header button{font-size:24px;background:none;cursor:pointer}.confirm p{padding:28px;margin:0;line-height:1.8}.confirm footer{display:flex;justify-content:flex-end;gap:12px;padding:0 20px 18px}.confirm footer button{height:38px;padding:0 22px;border-radius:7px;cursor:pointer}
+.settings-page{min-height:calc(100vh - 79px);display:grid;grid-template-columns:350px 1fr;gap:16px;padding:18px;background:#f7f9f8;color:#202b25}.card{background:#fff;border:1px solid #e5ebe8;border-radius:12px;box-shadow:0 4px 14px rgba(17,62,42,.045)}.profile-card{min-height:760px;padding:20px}.profile-card h2,.student-list h2,.chart-card h2{margin:0;font-size:19px}.avatar-view,.avatar-edit{position:relative;width:132px;height:132px;display:grid;place-items:center;margin:28px auto 24px;border-radius:50%;overflow:hidden;background:#eef3f0;color:#0b7c49;font-size:42px;font-weight:700}.avatar-view img,.avatar-edit img{width:100%;height:100%;object-fit:cover}.avatar-edit input{position:absolute;inset:0;opacity:0;cursor:pointer}.avatar-edit b{position:absolute;inset:auto 0 0;padding:8px;color:#fff;background:rgba(0,0,0,.42);font-size:12px;text-align:center}.info-list>div,.info-row{display:grid;grid-template-columns:110px 1fr;gap:12px;padding:15px 8px;border-bottom:1px solid #eef1ef}.info-list span,.info-row span{color:#6f7974}.info-list strong,.info-row strong{font-weight:600}.edit-form label{display:block;margin-bottom:13px;color:#6f7974}.edit-form input,.edit-form select{width:100%;height:40px;margin-top:7px;padding:0 11px;border:1px solid #dbe2df;border-radius:8px;background:#fff}.profile-card footer{display:flex;gap:12px;margin-top:24px}.profile-card footer button{height:42px;display:flex;align-items:center;justify-content:center;gap:6px;padding:0 20px;border-radius:8px;cursor:pointer}.save{color:#fff;background:#007a46}.delete{color:#e03e3e;border:1px solid #f0caca;background:#fff}.delete.solid{color:#fff;background:#d84b4b}.cancel{color:#202b25;border:1px solid #d7ddda;background:#fff}.main-area{display:grid;grid-template-rows:auto 1fr;gap:16px}.student-list{padding:18px}.filters{display:grid;grid-template-columns:minmax(260px,1fr) 220px auto auto;gap:14px;align-items:center;margin:18px 0}.keyword{height:42px;display:flex;align-items:center;padding:0 12px;border:1px solid #dce2de;border-radius:8px}.keyword input{flex:1;border:0;outline:0}.filters label:not(.keyword){display:flex;align-items:center;gap:8px;white-space:nowrap}.filters select{height:40px;min-width:135px;padding:0 10px;border:1px solid #dce2de;border-radius:8px;background:#fff}.filters button{height:40px;padding:0 22px;border-radius:8px;cursor:pointer}.search-btn{color:#fff;background:#007a46}.reset-btn,.ghost{border:1px solid #d7ddda;background:#fff}.table-wrap{min-height:350px;overflow:auto;border:1px solid #edf1ef;border-radius:8px}table{width:100%;min-width:820px;border-collapse:collapse;font-size:14px}th{height:42px;background:#fbfcfb;text-align:left}td{height:48px;border-top:1px solid #edf1ef;color:#3f4944}th:first-child,td:first-child{padding-left:18px}tbody tr{cursor:pointer}tbody tr:hover,tbody tr.selected{background:#f3fbf5}.student-cell{display:flex;align-items:center;gap:10px}.mini-avatar{width:28px;height:28px;display:grid;place-items:center;overflow:hidden;border-radius:50%;background:#e8f2ec;color:#0b7c49;font-size:12px}.mini-avatar img{width:100%;height:100%;object-fit:cover}.progress-cell{display:flex;align-items:center;gap:12px}.progress-cell i{width:170px;height:8px;overflow:hidden;background:#eef0f0;border-radius:999px}.progress-cell b{display:block;height:100%;border-radius:999px}.progress-cell .good{background:#078844}.progress-cell .warn,.progress-cell .low{background:#ff7b16}.pager{height:52px;display:flex;align-items:center;gap:16px;padding:0 10px}.pager select{height:34px;border:1px solid #dfe4e1;border-radius:7px;background:#fff}.pager nav{display:flex;align-items:center;gap:7px;margin-left:auto}.pager nav button{width:32px;height:32px;border:1px solid #dfe4e1;border-radius:7px;background:#fff;cursor:pointer}.pager nav button.active{color:#fff;background:#087640}.pager nav button:disabled{opacity:.45}.pager nav i{font-style:normal}.chart-card{padding:18px}.chart-card>header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px}.chart-card p{margin:6px 0 0;color:#66716c}.chart-card .ghost{height:36px;padding:0 14px;border-radius:8px;cursor:pointer}.chart-box{position:relative;height:300px}.chart{width:100%;height:100%}.progress-pop{position:absolute;z-index:4;display:flex;gap:6px;padding:6px;background:#fff;border:1px solid #dfe6e2;border-radius:8px;box-shadow:0 10px 24px rgba(0,40,20,.14)}.progress-pop button{height:28px;padding:0 10px;border-radius:6px;cursor:pointer}.progress-pop button:first-child{color:#fff;background:#087640}.progress-pop button:nth-child(2){color:#d84343;background:#fff;border:1px solid #efc8c8}.progress-pop button:nth-child(3){color:#0b6f9a;background:#eef8ff;border:1px solid #bfe2f5}.state{min-height:240px;display:flex;align-items:center;justify-content:center;gap:10px;color:#87908b}.state.small{min-height:220px}.loader{width:22px;height:22px;border:2px solid #d9e4dd;border-top-color:#26905a;border-radius:50%;animation:spin .7s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.toast{position:fixed;z-index:60;top:92px;left:50%;transform:translateX(-50%);padding:11px 20px;color:#fff;background:#238b57;border-radius:8px}.toast.error{background:#ce4e4e}.overlay{position:fixed;z-index:50;inset:0;display:grid;place-items:center;background:rgba(11,31,21,.42);backdrop-filter:blur(2px)}.confirm{width:min(450px,94vw);overflow:hidden}.confirm header{height:58px;display:flex;align-items:center;justify-content:space-between;padding:0 20px;border-bottom:1px solid #edf1ef}.confirm header button{font-size:24px;background:none;cursor:pointer}.confirm p{padding:28px;margin:0;line-height:1.8}.confirm footer{display:flex;justify-content:flex-end;gap:12px;padding:0 20px 18px}.confirm footer button{height:38px;padding:0 22px;border-radius:7px;cursor:pointer}.message-modal{width:min(520px,94vw)}.message-body{padding:22px}.message-body>div{display:grid;grid-template-columns:82px 1fr;gap:12px;padding:10px 0;border-bottom:1px solid #eef2f0}.message-body span{color:#6f7974}.message-body label{display:block;margin-top:16px;color:#6f7974}.message-body textarea{width:100%;height:130px;margin-top:8px;padding:10px;border:1px solid #dbe2df;border-radius:8px;resize:vertical;outline:none}.message-body small{display:block;margin-top:6px;text-align:right;color:#8b948f}.message-tip{padding:10px 12px!important;margin:10px 0 0!important;color:#60736a;background:#f4faf7;border:1px solid #dceee5;border-radius:8px;font-size:13px;line-height:1.6}
 @media(max-width:1200px){.settings-page{grid-template-columns:1fr}.profile-card{min-height:auto}.filters{grid-template-columns:1fr 1fr}.chart-box{height:330px}}@media(max-width:760px){.settings-page{padding:10px}.filters{grid-template-columns:1fr}.pager{flex-wrap:wrap;height:auto;padding:12px 0}.pager nav{width:100%;justify-content:center;margin-left:0}.profile-card footer{flex-wrap:wrap}.profile-card footer button{flex:1}.chart-card>header{gap:12px;flex-direction:column}.chart-box{height:280px}}
 </style>

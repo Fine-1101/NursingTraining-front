@@ -26,6 +26,7 @@ export const getDepartmentDistribution = (params = {}) => request(`${ROOT}/stude
 export const getStudentCourseProgress = (studentId) => request(`${ROOT}/students/${studentId}/course-progress`).then(unwrap)
 export const completeStudentCourseProgress = (studentId, courseId) => request(`${ROOT}/students/${studentId}/courses/${courseId}/progress/complete`, { method:'PATCH' }).then(unwrap)
 export const resetStudentCourseProgress = (studentId, courseId) => request(`${ROOT}/students/${studentId}/courses/${courseId}/progress/reset`, { method:'PATCH' }).then(unwrap)
+export const sendStudentCourseMessage = (studentId, courseId, content) => request(`${ROOT}/students/${studentId}/courses/${courseId}/messages`, { method:'POST', body:JSON.stringify({ content }) }).then(unwrap)
 export const getSettingsDepartmentOptions = () => request(`${ROOT}/departments/options`).then(unwrap)
 
 export async function uploadStudentAvatar(file) {
