@@ -26,9 +26,9 @@ const user = ref(getStoredUser() || {})
 const profileOpen = ref(false)
 const courseEditor = reactive({ id:null, resetKey:0 })
 
-const displayName = computed(() => user.value?.name || user.value?.username || '护理管理员')
+const displayName = computed(() => user.value?.realName || user.value?.name || user.value?.nickname || user.value?.username || '护理管理员')
 const displayEmail = computed(() => user.value?.email || 'admin@nursing.com')
-const avatar = computed(() => user.value?.avatar || '')
+const avatar = computed(() => user.value?.avatarUrl || user.value?.avatar || user.value?.headImg || user.value?.photoUrl || '')
 const assessmentMenuActive = computed(() => ['题库管理', '考核发布', '成绩管理'].includes(active.value))
 const courseMenuActive = computed(() => ['新建课程', '课程列表', '文章管理', '视频管理', 'PPT管理'].includes(active.value) || assessmentMenuActive.value)
 
@@ -38,9 +38,16 @@ const mainItems = [
   { label: '标签管理', icon: 'tag' },
 ]
 
+function normalizeCurrentUser(response) {
+  return response?.data?.user || response?.data || response?.user || response || {}
+}
+
 onMounted(async () => {
-  try { const response = await fetchCurrentUser(); user.value = response?.data?.user || {}; setStoredUser(user.value) }
-  catch { /* request layer handles authentication failures */ }
+  try {
+    const response = await fetchCurrentUser()
+    user.value = normalizeCurrentUser(response)
+    setStoredUser(user.value)
+  } catch { /* request layer handles authentication failures */ }
 })
 
 function select(label) {

@@ -100,6 +100,10 @@ async function loadDistribution() {
   }
 }
 async function selectStudent(row) {
+  if (selectedStudent.value?.studentId === row.studentId) {
+    clearSelected()
+    return
+  }
   detailLoading.value = true
   hoveredCourse.value = null
   try {

@@ -142,6 +142,10 @@ function toInputDateTime(value) {
   if (!value) return ''
   return String(value).slice(0, 16)
 }
+function displayDateTime(value) {
+  if (!value) return '—'
+  return String(value).replace('T', ' ').replace(/\+\d{2}:\d{2}$/, '').replace(/Z$/, '')
+}
 function flattenCategories(nodes, prefix = '') {
   return (nodes || []).flatMap(item => {
     const name = item.name || item.categoryName || item.title || ''
@@ -433,7 +437,7 @@ onMounted(async () => {
           <thead><tr><th>题干</th><th>题型</th><th>类别</th><th>难度</th><th>适用范围</th><th>状态</th><th>更新时间</th><th>操作</th></tr></thead>
           <tbody>
             <tr v-for="row in questionPage.records" :key="row.id">
-              <td class="stem">{{ row.stem }}</td><td>{{ row.questionTypeName || questionTypeText(row.questionType) }}</td><td>{{ row.categoryName || '—' }}</td><td>{{ row.difficultyName || difficultyText(row.difficulty) }}</td><td>{{ row.scopeName || (row.courseIds?.length ? '指定课程' : '类别及子类别通用') }}</td><td><span class="badge" :class="{ off:Number(row.status)!==1 }">{{ questionStatusText(row.status) }}</span></td><td>{{ row.updatedAt || row.createdAt || '—' }}</td>
+              <td class="stem">{{ row.stem }}</td><td>{{ row.questionTypeName || questionTypeText(row.questionType) }}</td><td>{{ row.categoryName || '—' }}</td><td>{{ row.difficultyName || difficultyText(row.difficulty) }}</td><td>{{ row.scopeName || (row.courseIds?.length ? '指定课程' : '类别及子类别通用') }}</td><td><span class="badge" :class="{ off:Number(row.status)!==1 }">{{ questionStatusText(row.status) }}</span></td><td>{{ displayDateTime(row.updatedAt || row.createdAt) }}</td>
               <td class="actions"><button @click="openEditQuestion(row)">编辑</button><button @click="toggleQuestionStatus(row)">{{ Number(row.status) === 1 ? '停用' : '启用' }}</button><button class="danger-text" @click="removeQuestion(row)">删除</button></td>
             </tr>
           </tbody>
@@ -457,7 +461,7 @@ onMounted(async () => {
           <thead><tr><th>考核名称</th><th>课程</th><th>开考时间</th><th>时长</th><th>总分/及格</th><th>参与/通过</th><th>状态</th><th>操作</th></tr></thead>
           <tbody>
             <tr v-for="row in assessmentPage.records" :key="row.id">
-              <td>{{ row.title }}</td><td>{{ row.courseTitle || '—' }}</td><td>{{ row.startAt }}<small v-if="row.endAt"> 至 {{ row.endAt }}</small></td><td>{{ row.durationMinutes }} 分钟</td><td>{{ money(row.totalScore) }} / {{ money(row.passScore) }}</td><td>{{ number(row.participantCount) }} / {{ number(row.passedCount) }}</td><td><span class="badge" :class="{ draft:Number(row.status)===0, off:Number(row.status)===2 }">{{ statusText(row.status) }}</span></td>
+              <td>{{ row.title }}</td><td>{{ row.courseTitle || '—' }}</td><td>{{ displayDateTime(row.startAt) }}<small v-if="row.endAt"> 至 {{ displayDateTime(row.endAt) }}</small></td><td>{{ row.durationMinutes }} 分钟</td><td>{{ money(row.totalScore) }} / {{ money(row.passScore) }}</td><td>{{ number(row.participantCount) }} / {{ number(row.passedCount) }}</td><td><span class="badge" :class="{ draft:Number(row.status)===0, off:Number(row.status)===2 }">{{ statusText(row.status) }}</span></td>
               <td class="actions"><button v-if="Number(row.status)===0" @click="openEditAssessment(row)">编辑</button><button v-if="Number(row.status)===0" @click="checkCapacity(row)">检查</button><button v-if="Number(row.status)===0" @click="publishRow(row)">发布</button><button v-if="Number(row.status)===1" @click="closeRow(row)">关闭</button><button v-if="Number(row.status)===0" class="danger-text" @click="removeAssessment(row)">删除</button></td>
             </tr>
           </tbody>
@@ -482,7 +486,7 @@ onMounted(async () => {
           <thead><tr><th>学员</th><th>考核</th><th>课程</th><th>科室</th><th>分数</th><th>结果</th><th>交卷时间</th><th>操作</th></tr></thead>
           <tbody>
             <tr v-for="row in resultPage.records" :key="row.attemptId">
-              <td>{{ row.realName }}<small>{{ row.username }}</small></td><td>{{ row.assessmentTitle }}</td><td>{{ row.courseTitle }}</td><td>{{ row.departmentName || '—' }}</td><td>{{ money(row.score) }} / {{ money(row.totalScore) }}</td><td><span class="badge" :class="{ off:row.passed===false }">{{ passText(row.passed) }}</span></td><td>{{ row.submittedAt || '—' }}</td><td class="actions"><button @click="openResult(row)">详情</button></td>
+              <td>{{ row.realName }}<small>{{ row.username }}</small></td><td>{{ row.assessmentTitle }}</td><td>{{ row.courseTitle }}</td><td>{{ row.departmentName || '—' }}</td><td>{{ money(row.score) }} / {{ money(row.totalScore) }}</td><td><span class="badge" :class="{ off:row.passed===false }">{{ passText(row.passed) }}</span></td><td>{{ displayDateTime(row.submittedAt) }}</td><td class="actions"><button @click="openResult(row)">详情</button></td>
             </tr>
           </tbody>
         </table>
