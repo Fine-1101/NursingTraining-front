@@ -523,7 +523,7 @@ onMounted(async () => {
           <label>所属课程<select v-model="assessmentModal.courseId" required><option value="">请选择</option><option v-for="item in assessmentCourseOptions" :key="item.id" :value="item.id">{{ item.title }}</option></select></label>
           <label>考核名称<input v-model="assessmentModal.title" maxlength="200" required /></label>
           <label>开考时间<input v-model="assessmentModal.startAt" type="datetime-local" required /></label>
-          <label>最晚开考<input v-model="assessmentModal.endAt" type="datetime-local" /></label>
+          <label>最晚提交时间<input v-model="assessmentModal.endAt" type="datetime-local" /></label>
           <label>答题时长<input v-model.number="assessmentModal.durationMinutes" type="number" min="1" /></label>
           <label>及格分<input v-model.number="assessmentModal.passScore" type="number" min="0" step="0.5" /></label>
           <label>最多次数<input v-model.number="assessmentModal.maxAttempts" type="number" min="1" /></label>
