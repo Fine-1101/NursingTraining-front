@@ -44,7 +44,7 @@ const confirmBox = reactive({ open:false, title:'', content:'', action:null, loa
 
 const basic = reactive({
   title:'', summary:'', learningObjective:'', categoryId:'', coverUrl:'',
-  tagIds:[], instructorId:'', startAt:'', departments:[],
+  tagIds:[], instructorId:'', startAt:'', endAt:'', departments:[],
 })
 
 const point = reactive({
@@ -172,7 +172,10 @@ async function restoreCourse() {
   try {
     const data = await getCourse(courseId.value)
     fillCourse(data)
-    step.value = Math.min(Math.max(data.currentStep || 2, 1), 3)
+    // 从课程列表进入编辑时始终展示第一步；只有创建草稿恢复时才续接后端步骤。
+    step.value = props.editCourseId
+      ? 1
+      : Math.min(Math.max(data.currentStep || 2, 1), 3)
   } catch (error) {
     // 课程不存在时，清理残留的过期 ID 和缓存，避免重复报错
     syncStoredId(null)
@@ -193,6 +196,7 @@ function fillCourse(data = {}) {
     tagIds:[...(data.tagIds || [])],
     instructorId:data.instructorId || '',
     startAt:dateInput(data.startAt),
+    endAt:dateInput(data.endAt),
     departments:(data.departments || []).map(item => ({ departmentId:item.departmentId || item.id, required:Boolean(item.required) })),
   })
   // 将讲师信息放入 instructors 列表，使 selectedInstructor 计算属性能正确显示
@@ -218,6 +222,7 @@ function validateBasic() {
   if (!basic.summary.trim()) return '请输入课程简介'
   if (basic.summary.trim().length > 500) return '课程简介不能超过 500 个字符'
   if (!basic.instructorId) return '请选择讲师'
+  if (basic.startAt && basic.endAt && basic.endAt < basic.startAt) return '结课时间不能早于开课时间'
   if (basic.tagIds.length > 3) return '标签最多选择 3 个'
   return ''
 }
@@ -239,6 +244,7 @@ function basicPayload() {
     tagIds:basic.tagIds.map(Number),
     instructorId:Number(basic.instructorId),
     startAt:toDateTime(basic.startAt),
+    endAt:toDateTime(basic.endAt),
     departments:departmentPayload(),
   }
 }
@@ -589,7 +595,7 @@ function resetAll() {
   syncStoredId(null)
   localStorage.removeItem(BASIC_CACHE_KEY)
   step.value = 1
-  Object.assign(basic, { title:'', summary:'', learningObjective:'', categoryId:'', coverUrl:'', tagIds:[], instructorId:'', startAt:'', departments:[] })
+  Object.assign(basic, { title:'', summary:'', learningObjective:'', categoryId:'', coverUrl:'', tagIds:[], instructorId:'', startAt:'', endAt:'', departments:[] })
   instructors.value = []
   chapters.value = []
   activeChapterId.value = null
@@ -606,7 +612,7 @@ function resetAll() {
 function cacheBasic() {
   try {
     const instr = selectedInstructor.value
-    const snap = { title:basic.title, summary:basic.summary, learningObjective:basic.learningObjective, categoryId:basic.categoryId, coverUrl:basic.coverUrl, tagIds:[...basic.tagIds], instructorId:basic.instructorId, instructorName:instr?.realName||'', instructorUsername:instr?.username||'', instructorDept:instr?.departmentName||'', startAt:basic.startAt }
+    const snap = { title:basic.title, summary:basic.summary, learningObjective:basic.learningObjective, categoryId:basic.categoryId, coverUrl:basic.coverUrl, tagIds:[...basic.tagIds], instructorId:basic.instructorId, instructorName:instr?.realName||'', instructorUsername:instr?.username||'', instructorDept:instr?.departmentName||'', startAt:basic.startAt, endAt:basic.endAt }
     const has = snap.title || snap.summary || snap.categoryId || snap.coverUrl || snap.instructorId
     if (has) localStorage.setItem(BASIC_CACHE_KEY, JSON.stringify(snap))
     else localStorage.removeItem(BASIC_CACHE_KEY)
@@ -618,7 +624,7 @@ function restoreBasicCache() {
     if (!raw) return false
     const c = JSON.parse(raw)
     if (!c || (!c.title && !c.summary && !c.categoryId && !c.coverUrl && !c.instructorId)) return false
-    Object.assign(basic, { title:c.title||'', summary:c.summary||'', learningObjective:c.learningObjective||'', categoryId:c.categoryId||'', coverUrl:c.coverUrl||'', tagIds:[...(c.tagIds||[])], instructorId:c.instructorId||'', startAt:c.startAt||'' })
+    Object.assign(basic, { title:c.title||'', summary:c.summary||'', learningObjective:c.learningObjective||'', categoryId:c.categoryId||'', coverUrl:c.coverUrl||'', tagIds:[...(c.tagIds||[])], instructorId:c.instructorId||'', startAt:c.startAt||'', endAt:c.endAt||'' })
     // 恢复讲师显示信息
     if (c.instructorId && (c.instructorName || c.instructorUsername)) {
       instructors.value = [{ id:c.instructorId, realName:c.instructorName||'', username:c.instructorUsername||'', departmentName:c.instructorDept||'' }]
@@ -680,23 +686,26 @@ watch(() => ({ ...basic, tagIds:[...basic.tagIds] }), () => {
       <section v-if="step === 1" class="panel card basic-panel">
         <header><h2>基础信息</h2></header>
         <div class="basic-sketch">
-          <div class="basic-left">
-            <div class="top-row">
-              <label>课程名称 <em>*</em><input v-model="basic.title" maxlength="50" placeholder="请输入课程名称" /><small>{{ basic.title.length }}/50</small></label>
-              <label>所属类别 <em>*</em><select v-model="basic.categoryId"><option value="">请选择课程类别</option><option v-for="item in categories" :key="item.id" :value="item.id">{{ item.name }}</option></select><small v-if="!categories.length">暂无类别数据</small></label>
-            </div>
+          <div class="basic-column meta-column">
+            <label>课程名称 <em>*</em><input v-model="basic.title" maxlength="50" placeholder="请输入课程名称" /><small>{{ basic.title.length }}/50</small></label>
+            <label>所属类别 <em>*</em><select v-model="basic.categoryId"><option value="">请选择课程类别</option><option v-for="item in categories" :key="item.id" :value="item.id">{{ item.name }}</option></select><small v-if="!categories.length">暂无类别数据</small></label>
+            <label>讲师 <em>*</em><button type="button" class="picker-field" @click="openInstructorPicker"><span v-if="selectedInstructor">{{ selectedInstructor.realName || selectedInstructor.username }}{{ selectedInstructor.departmentName ? `（${selectedInstructor.departmentName}）` : '' }}</span><span v-else>搜索并选择讲师</span><AppIcon name="search" :size="16" /></button></label>
+            <label>开课时间 <input v-model="basic.startAt" type="date" /></label>
+            <label>结课时间 <input v-model="basic.endAt" type="date" /></label>
+          </div>
+          <div class="basic-column desc-column">
+
             <label class="summary">课程简介 <em>*</em><textarea v-model="basic.summary" maxlength="500" placeholder="请输入课程简介，介绍课程目标、内容、收益等..."></textarea><small>{{ basic.summary.length }}/500</small></label>
-            <div class="bottom-row">
-              <label>讲师 <em>*</em><button type="button" class="picker-field" @click="openInstructorPicker"><span v-if="selectedInstructor">{{ selectedInstructor.realName || selectedInstructor.username }}{{ selectedInstructor.departmentName ? `（${selectedInstructor.departmentName}）` : '' }}</span><span v-else>搜索并选择讲师</span><AppIcon name="search" :size="16" /></button></label>
-              <label>开课时间 <input v-model="basic.startAt" type="date" /></label>
-              <div class="tags">
-                <strong>标签 <button type="button" class="tag-add" title="添加标签" @click="openTagPopup">＋</button></strong>
-                <div class="selected-tags"><span v-for="item in selectedTags" :key="item.id" :style="{ borderColor:item.color || '#d2e8d3' }">{{ item.name }}<button type="button" @click="toggleTag(item.id)">×</button></span><em v-if="!selectedTags.length">最多 3 个</em></div>
-              </div>
+            <div class="tags">
+              <strong>标签 <button type="button" class="tag-add" title="添加标签" @click="openTagPopup">＋</button></strong>
+              <div class="selected-tags"><span v-for="item in selectedTags" :key="item.id" :style="{ borderColor:item.color || '#d2e8d3' }">{{ item.name }}<button type="button" @click="toggleTag(item.id)">×</button></span><em v-if="!selectedTags.length">最多 3 个</em></div>
             </div>
           </div>
-          <label class="objective">学习目标 <em>*</em><textarea v-model="basic.learningObjective" maxlength="300" placeholder="请描述学员完成本课程后应达到的知识、技能或能力目标..."></textarea><small>{{ basic.learningObjective.length }}/300</small></label>
-          <label class="cover">封面上传 <em>*</em><input type="file" accept="image/jpeg,image/png" @change="chooseCover($event.target.files[0])" /><img v-if="basic.coverUrl" :src="basic.coverUrl" alt="课程封面" /><span v-else><AppIcon name="image" :size="36" />点击上传封面<small>JPG/PNG，最大 2MB</small></span></label>
+          <label class="basic-column objective">学习目标 <em>*</em><textarea v-model="basic.learningObjective" maxlength="300" placeholder="请描述学员完成本课程后应达到的知识、技能或能力目标..."></textarea><small>{{ basic.learningObjective.length }}/300</small></label>
+          <div class="cover-column">
+            <strong>封面上传 <em>*</em></strong>
+            <label class="cover"><input type="file" accept="image/jpeg,image/png" @change="chooseCover($event.target.files[0])" /><img v-if="basic.coverUrl" :src="basic.coverUrl" alt="课程封面" /><span v-else><AppIcon name="image" :size="36" />点击上传封面<small>JPG/PNG，最大 2MB</small></span></label>
+          </div>
         </div>
       </section>
 
@@ -890,4 +899,31 @@ watch(() => ({ ...basic, tagIds:[...basic.tagIds] }), () => {
 .points-card tbody tr:hover{background:#f8fcf7}
 .points-card td:first-child{gap:10px!important}
 @media(max-width:760px){.mini-search{flex-direction:column}.dept-list{grid-template-columns:1fr!important}}
+
+.basic-sketch{display:grid;grid-template-columns:minmax(220px,1fr) minmax(260px,1.15fr) minmax(230px,1fr) minmax(220px,.95fr);gap:22px;align-items:stretch;min-height:360px}
+.basic-sketch *{box-sizing:border-box}
+.basic-column,.cover-column{height:100%;min-height:360px}
+.basic-column{display:flex;flex-direction:column;min-width:0}
+.meta-column{justify-content:space-between;gap:12px}
+.meta-column label{min-height:58px}
+.desc-column{display:grid;grid-template-rows:4fr 1fr;gap:16px}
+.basic-sketch .summary,.basic-sketch .objective{display:flex;flex-direction:column;width:100%;min-width:0;min-height:0}
+.basic-sketch .summary,.basic-sketch .objective{grid-row:auto!important;grid-column:auto!important}
+.basic-sketch .tags{grid-row:auto!important;grid-column:auto!important}
+.basic-sketch .objective{height:100%;overflow:hidden}
+.basic-sketch .summary textarea,.basic-sketch .objective textarea{flex:1;width:100%;height:auto;min-height:0;resize:none}
+.basic-sketch .summary>small,.basic-sketch .objective>small{position:absolute;right:12px;bottom:10px;color:#9ba29f;font-weight:400}
+.basic-sketch .tags small{position:static!important;color:#8c9490;font-weight:400}
+.cover-column{display:flex;flex-direction:column;min-width:0}
+.cover-column>strong{display:block;height:31px;margin-bottom:10px;font-size:13px}
+.basic-sketch .cover{position:relative;display:block;flex:1;min-height:0;border:1px dashed #b7cfc3;border-radius:9px;overflow:hidden;text-align:center;color:#717b76}
+.basic-sketch .cover input{position:absolute;inset:0;z-index:2;opacity:0;cursor:pointer}
+.basic-sketch .cover img{width:100%;height:100%;object-fit:cover}
+.basic-sketch .cover>span{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px}
+.desc-column .tags{display:flex;flex-direction:column;width:100%;min-width:0;min-height:0;box-sizing:border-box;padding:12px;border:1px solid #e4ece7;border-radius:9px;background:#fbfdfb}
+.desc-column .tags strong{height:auto;margin:0 0 8px}
+.desc-column .selected-tags{flex:1;align-content:flex-start;min-height:0;padding:0;overflow:auto}
+
+@media(max-width:1350px){.basic-sketch{grid-template-columns:1fr 1fr;min-height:auto}.basic-column,.cover-column{min-height:320px}.desc-column{grid-template-rows:4fr 1fr}}
+@media(max-width:760px){.basic-sketch{grid-template-columns:1fr}.basic-column,.cover-column{min-height:260px}.meta-column{justify-content:flex-start}.desc-column{min-height:330px}}
 </style>
