@@ -14,8 +14,11 @@ import {
   getAssessmentResult,
   getAssessmentResults,
   getAssessmentResultSummary,
+  getAssessmentParticipants,
+  getAssessmentReminders,
   getAssessments,
   publishAssessment,
+  sendNonParticipantReminders,
   updateAssessment,
   updateAssessmentQuestion,
   updateAssessmentQuestionStatus,
@@ -57,6 +60,10 @@ const capacity = ref(null)
 const resultQuery = reactive({ assessmentId:'', courseId:'', categoryId:'', departmentId:'', keyword:'', passed:'', submittedFrom:'', submittedTo:'', page:1, size:10 })
 const resultPage = reactive({ records:[], total:0, pages:1 })
 const resultDetail = reactive({ open:false, loading:false, data:null, summary:null })
+const participantDialog = reactive({ open:false, loading:false, assessment:null, summary:null, records:[], total:0, pages:1 })
+const participantQuery = reactive({ participationStatus:'ALL', keyword:'', departmentId:'', page:1, size:20 })
+const reminderForm = reactive({ content:'', remindAll:true, sending:false, lastResult:null })
+const selectedParticipantIds = ref(new Set())
 
 const categoryOptions = computed(() => categories.value)
 const courseOptions = computed(() => courses.value)
@@ -134,6 +141,9 @@ function questionStatusText(value) { return Number(value) === 1 ? '启用' : '�
 function questionTypeText(value) { return Number(value) === 1 ? '单选题' : '判断题' }
 function difficultyText(value) { return ({ 1:'简单', 2:'中等', 3:'困难' })[Number(value)] || '中等' }
 function passText(value) { return value === true ? '通过' : value === false ? '未通过' : '—' }
+function participationText(value) {
+  return ({ ALL:'全部', PARTICIPATED:'已参加', NOT_PARTICIPATED:'未参加', IN_PROGRESS:'答题中', SUBMITTED:'已交卷' })[value] || value || '—'
+}
 function normalizeDateTime(value) {
   if (!value) return ''
   return value.length === 16 ? `${value}:00` : value
@@ -362,6 +372,93 @@ async function removeAssessment(row) {
   catch (error) { toast(error.message, 'error') }
 }
 
+async function openParticipants(row) {
+  Object.assign(participantDialog, { open:true, loading:true, assessment:row, summary:null, records:[], total:0, pages:1 })
+  Object.assign(participantQuery, { participationStatus:'ALL', keyword:'', departmentId:'', page:1, size:20 })
+  Object.assign(reminderForm, { content:'', remindAll:true, sending:false, lastResult:null })
+  selectedParticipantIds.value = new Set()
+  try {
+    const [detail, summary] = await Promise.all([
+      getAssessment(row.id).catch(() => row),
+      getAssessmentResultSummary(row.id).catch(() => null),
+    ])
+    participantDialog.assessment = { ...row, ...detail }
+    participantDialog.summary = summary
+    await loadParticipants()
+  } catch (error) {
+    toast(error.message, 'error')
+  } finally {
+    participantDialog.loading = false
+  }
+}
+
+async function loadParticipants() {
+  if (!participantDialog.assessment?.id) return
+  participantDialog.loading = true
+  try {
+    const data = await getAssessmentParticipants(participantDialog.assessment.id, {
+      participationStatus:participantQuery.participationStatus,
+      keyword:participantQuery.keyword.trim(),
+      departmentId:participantQuery.departmentId,
+      page:participantQuery.page,
+      size:participantQuery.size,
+    })
+    participantDialog.records = data?.records || []
+    participantDialog.total = data?.total || 0
+    participantDialog.pages = data?.pages || 1
+    selectedParticipantIds.value = new Set([...selectedParticipantIds.value].filter(id => participantDialog.records.some(row => row.userId === id)))
+  } catch (error) {
+    toast(error.message, 'error')
+  } finally {
+    participantDialog.loading = false
+  }
+}
+
+function switchParticipants(status) {
+  participantQuery.participationStatus = status
+  participantQuery.page = 1
+  selectedParticipantIds.value = new Set()
+  loadParticipants()
+}
+
+function toggleParticipant(id) {
+  const next = new Set(selectedParticipantIds.value)
+  next.has(id) ? next.delete(id) : next.add(id)
+  selectedParticipantIds.value = next
+}
+
+function toggleAllParticipants() {
+  const candidates = participantDialog.records.filter(row => row.participationStatus === 'NOT_PARTICIPATED')
+  const allSelected = candidates.length && candidates.every(row => selectedParticipantIds.value.has(row.userId))
+  selectedParticipantIds.value = allSelected ? new Set() : new Set(candidates.map(row => row.userId))
+}
+
+async function sendReminders(remindAll = false) {
+  const content = reminderForm.content.trim()
+  if (content.length > 500) return toast('提醒备注不能超过 500 字', 'error')
+  const userIds = [...selectedParticipantIds.value]
+  if (!remindAll && !userIds.length) return toast('请先勾选未参加人员，或使用一键提醒全部未参加人员', 'error')
+  if (!window.confirm(remindAll ? '确定提醒全部当前未参加考核的学员吗？' : `确定提醒已勾选的 ${userIds.length} 名未参加学员吗？`)) return
+  reminderForm.sending = true
+  try {
+    const result = await sendNonParticipantReminders(participantDialog.assessment.id, {
+      userIds:remindAll ? [] : userIds,
+      remindAll,
+      content:content || null,
+    })
+    reminderForm.lastResult = result
+    selectedParticipantIds.value = new Set()
+    toast(`提醒已发送：成功 ${number(result.sentCount)} 人，跳过 ${number(result.skippedCount)} 人`)
+    if (participantQuery.participationStatus !== 'NOT_PARTICIPATED') participantQuery.participationStatus = 'NOT_PARTICIPATED'
+    participantQuery.page = 1
+    await loadParticipants()
+  } catch (error) {
+    toast(error.message, 'error')
+  } finally {
+    reminderForm.sending = false
+  }
+}
+
 async function loadResults() {
   loading.value = true
   try {
@@ -461,8 +558,8 @@ onMounted(async () => {
           <thead><tr><th>考核名称</th><th>课程</th><th>开考时间</th><th>时长</th><th>总分/及格</th><th>参与/通过</th><th>状态</th><th>操作</th></tr></thead>
           <tbody>
             <tr v-for="row in assessmentPage.records" :key="row.id">
-              <td>{{ row.title }}</td><td>{{ row.courseTitle || '—' }}</td><td>{{ displayDateTime(row.startAt) }}<small v-if="row.endAt"> 至 {{ displayDateTime(row.endAt) }}</small></td><td>{{ row.durationMinutes }} 分钟</td><td>{{ money(row.totalScore) }} / {{ money(row.passScore) }}</td><td>{{ number(row.participantCount) }} / {{ number(row.passedCount) }}</td><td><span class="badge" :class="{ draft:Number(row.status)===0, off:Number(row.status)===2 }">{{ statusText(row.status) }}</span></td>
-              <td class="actions"><button v-if="Number(row.status)===0" @click="openEditAssessment(row)">编辑</button><button v-if="Number(row.status)===0" @click="checkCapacity(row)">检查</button><button v-if="Number(row.status)===0" @click="publishRow(row)">发布</button><button v-if="Number(row.status)===1" @click="closeRow(row)">关闭</button><button v-if="Number(row.status)===0" class="danger-text" @click="removeAssessment(row)">删除</button></td>
+              <td><button class="link-title" @click="openParticipants(row)">{{ row.title }}</button></td><td>{{ row.courseTitle || '—' }}</td><td>{{ displayDateTime(row.startAt) }}<small v-if="row.endAt"> 至 {{ displayDateTime(row.endAt) }}</small></td><td>{{ row.durationMinutes }} 分钟</td><td>{{ money(row.totalScore) }} / {{ money(row.passScore) }}</td><td>{{ number(row.participantCount) }} / {{ number(row.passedCount) }}</td><td><span class="badge" :class="{ draft:Number(row.status)===0, off:Number(row.status)===2 }">{{ statusText(row.status) }}</span></td>
+              <td class="actions"><button @click="openParticipants(row)">情况</button><button v-if="Number(row.status)===0" @click="openEditAssessment(row)">编辑</button><button v-if="Number(row.status)===0" @click="checkCapacity(row)">检查</button><button v-if="Number(row.status)===0" @click="publishRow(row)">发布</button><button v-if="Number(row.status)===1" @click="closeRow(row)">关闭</button><button v-if="Number(row.status)===0" class="danger-text" @click="removeAssessment(row)">删除</button></td>
             </tr>
           </tbody>
         </table>
@@ -535,6 +632,64 @@ onMounted(async () => {
       </form>
     </div>
 
+    <div v-if="participantDialog.open" class="overlay" @mousedown.self="participantDialog.open=false">
+      <div class="dialog participants-dialog">
+        <header><h2>考试情况</h2><button type="button" @click="participantDialog.open=false">×</button></header>
+        <div class="participants-body">
+          <section class="assessment-brief">
+            <div><strong>{{ participantDialog.assessment?.title }}</strong><span>{{ participantDialog.assessment?.courseTitle || '—' }}</span></div>
+            <p>{{ displayDateTime(participantDialog.assessment?.startAt) }}<template v-if="participantDialog.assessment?.endAt"> 至 {{ displayDateTime(participantDialog.assessment?.endAt) }}</template></p>
+          </section>
+          <div class="participant-stats">
+            <span>参加 {{ number(participantDialog.summary?.participantCount) }}</span>
+            <span>通过 {{ number(participantDialog.summary?.passedCount) }}</span>
+            <span>未参加 {{ number(participantDialog.summary?.notParticipatedCount) }}</span>
+            <span>答题中 {{ number(participantDialog.summary?.inProgressCount) }}</span>
+            <span>平均分 {{ money(participantDialog.summary?.averageScore) }}</span>
+          </div>
+          <div class="participant-tabs">
+            <button v-for="status in ['ALL','PARTICIPATED','NOT_PARTICIPATED','IN_PROGRESS','SUBMITTED']" :key="status" :class="{ active:participantQuery.participationStatus===status }" @click="switchParticipants(status)">{{ participationText(status) }}</button>
+          </div>
+          <div class="participant-tools">
+            <input v-model="participantQuery.keyword" placeholder="搜索姓名或工号..." @keyup.enter="participantQuery.page=1;loadParticipants()" />
+            <select v-model="participantQuery.departmentId" @change="participantQuery.page=1;loadParticipants()"><option value="">全部科室</option><option v-for="item in departments" :key="item.id" :value="item.id">{{ item.name }}</option></select>
+            <button @click="participantQuery.page=1;loadParticipants()">查询</button>
+            <button @click="Object.assign(participantQuery,{ keyword:'', departmentId:'', page:1 });loadParticipants()">重置</button>
+          </div>
+          <div class="reminder-box">
+            <textarea v-model="reminderForm.content" maxlength="500" placeholder="提醒备注（选填），课程和考核信息由后端自动附带"></textarea>
+            <small>{{ reminderForm.content.trim().length }}/500</small>
+            <div>
+              <button :disabled="reminderForm.sending" @click="sendReminders(false)">提醒勾选未参加人员</button>
+              <button class="primary" :disabled="reminderForm.sending" @click="sendReminders(true)">一键提醒全部未参加</button>
+            </div>
+            <p v-if="reminderForm.lastResult">最近批次：{{ reminderForm.lastResult.batchId }}；成功 {{ number(reminderForm.lastResult.sentCount) }}，跳过 {{ number(reminderForm.lastResult.skippedCount) }}，失败 {{ number(reminderForm.lastResult.failedCount) }}</p>
+          </div>
+          <div class="table-wrap participant-table">
+            <table>
+              <thead><tr><th><input type="checkbox" @change="toggleAllParticipants" /></th><th>学员</th><th>科室</th><th>状态</th><th>次数</th><th>最高分</th><th>最近分数</th><th>结果</th><th>开考/交卷</th><th>提醒</th></tr></thead>
+              <tbody>
+                <tr v-for="row in participantDialog.records" :key="row.userId">
+                  <td><input type="checkbox" :disabled="row.participationStatus !== 'NOT_PARTICIPATED'" :checked="selectedParticipantIds.has(row.userId)" @change="toggleParticipant(row.userId)" /></td>
+                  <td><strong>{{ row.realName }}</strong><small>{{ row.username }}</small></td>
+                  <td>{{ row.departmentName || '—' }}</td>
+                  <td><span class="badge" :class="{ off:row.participationStatus==='NOT_PARTICIPATED', draft:row.participationStatus==='IN_PROGRESS' }">{{ participationText(row.participationStatus) }}</span></td>
+                  <td>{{ number(row.attemptCount) }}</td>
+                  <td>{{ row.bestScore == null ? '—' : money(row.bestScore) }}</td>
+                  <td>{{ row.latestScore == null ? '—' : money(row.latestScore) }}</td>
+                  <td>{{ passText(row.passed) }}</td>
+                  <td><small>{{ displayDateTime(row.startedAt) }}<template v-if="row.submittedAt"> / {{ displayDateTime(row.submittedAt) }}</template></small></td>
+                  <td><small>{{ row.reminded ? `已提醒 ${displayDateTime(row.lastRemindedAt)}` : '未提醒' }}</small></td>
+                </tr>
+              </tbody>
+            </table>
+            <div v-if="participantDialog.loading" class="state">正在加载...</div><div v-else-if="!participantDialog.records.length" class="state">暂无人员</div>
+          </div>
+          <footer class="pager"><span>共 {{ number(participantDialog.total) }} 人</span><button @click="prevPage(participantQuery, loadParticipants)">上一页</button><b>{{ participantQuery.page }} / {{ participantDialog.pages }}</b><button @click="nextPage(participantQuery, participantDialog, loadParticipants)">下一页</button></footer>
+        </div>
+      </div>
+    </div>
+
     <div v-if="resultDetail.open" class="overlay" @mousedown.self="resultDetail.open=false">
       <div class="dialog result-dialog">
         <header><h2>成绩详情</h2><button type="button" @click="resultDetail.open=false">×</button></header>
@@ -559,5 +714,29 @@ onMounted(async () => {
 
 <style scoped>
 .assessment-page{min-height:calc(100vh - 79px);padding:22px;background:#f7f9f8;color:#1f2924}.tabs{height:64px;display:flex;align-items:center;gap:12px;margin-bottom:14px;padding:0 16px;background:#fff;border:1px solid #e5ebe7;border-radius:14px;box-shadow:0 4px 14px rgba(17,62,42,.045)}.tabs button{height:38px;padding:0 18px;border:1px solid #dce5df;border-radius:20px;background:#fff;cursor:pointer}.tabs button.active{color:#fff;background:#087443;border-color:#087443}.tabs span{margin-left:auto;color:#6d7772}.panel{background:#fff;border:1px solid #e5ebe7;border-radius:14px;box-shadow:0 4px 14px rgba(17,62,42,.045);overflow:hidden}.toolbar{min-height:72px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 18px;border-bottom:1px solid #edf1ef}.toolbar input,.toolbar select{height:38px;padding:0 12px;border:1px solid #dce2de;border-radius:8px;background:#fff;outline:none}.toolbar input{width:230px}.toolbar button,.pager button,.dialog footer button{height:38px;padding:0 16px;border:1px solid #dce2de;border-radius:8px;background:#fff;cursor:pointer}.primary{color:#fff!important;background:linear-gradient(90deg,#16884b,#69b820)!important;border:0!important}.table-wrap{overflow:auto;position:relative}table{width:100%;min-width:1060px;border-collapse:collapse;font-size:13px}th{height:48px;background:#fbfcfb;color:#303733;text-align:left}td{height:58px;border-top:1px solid #edf1ef;color:#4f5853;vertical-align:middle}th:first-child,td:first-child{padding-left:18px}.stem{max-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.badge{display:inline-flex;align-items:center;height:24px;padding:0 10px;color:#16864b;background:#eaf8e9;border-radius:14px}.badge.off{color:#d05252;background:#fff0f0}.badge.draft{color:#777;background:#eef1f0}.actions{white-space:nowrap}.actions button{margin-right:10px;color:#126d42;background:none;cursor:pointer}.danger-text{color:#d84b4b!important}.state{height:180px;display:flex;align-items:center;justify-content:center;color:#8a948f}.pager{height:56px;display:flex;align-items:center;justify-content:flex-end;gap:16px;padding:0 18px;border-top:1px solid #edf1ef}.toast{position:fixed;z-index:80;top:92px;left:50%;transform:translateX(-50%);padding:10px 18px;color:#fff;background:#228653;border-radius:8px;box-shadow:0 8px 20px rgba(0,0,0,.15)}.toast.error{background:#d15050}.overlay{position:fixed;z-index:70;inset:0;display:grid;place-items:center;padding:20px;background:rgba(11,31,21,.38);backdrop-filter:blur(2px)}.dialog{width:min(720px,96vw);max-height:90vh;overflow:auto;background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(0,35,20,.22)}.dialog.wide{width:min(920px,96vw)}.dialog header{height:60px;display:flex;align-items:center;justify-content:space-between;padding:0 22px;border-bottom:1px solid #eaeeeb}.dialog h2{margin:0;font-size:19px}.dialog header button{font-size:26px;background:none;cursor:pointer}.form-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;padding:22px}.form-grid label{display:flex;flex-direction:column;gap:8px;font-size:13px;font-weight:600}.form-grid input,.form-grid select,.form-grid textarea{width:100%;padding:10px;border:1px solid #dce2de;border-radius:8px;background:#fff;outline:none}.form-grid textarea{height:92px;resize:vertical}.form-grid select[multiple]{height:110px}.full{grid-column:1/-1}.options{display:grid;gap:10px}.options strong,.rules strong{margin-bottom:4px}.options label{display:grid;grid-template-columns:20px 36px 1fr;align-items:center}.rules{padding:14px;border:1px solid #e5ebe7;border-radius:10px}.rules div{display:flex;align-items:center;gap:10px;margin-top:10px}.rules input{width:90px}.capacity{padding:12px;border:1px solid #f0d4a9;background:#fffaf0;border-radius:10px}.capacity .ok{color:#16864b}.dialog footer{height:62px;display:flex;justify-content:flex-end;align-items:center;gap:12px;padding:0 22px;background:#fafbfa;border-top:1px solid #eef2f0}.result-dialog{width:min(900px,96vw)}.result-body{padding:22px}.score-card{display:flex;align-items:baseline;gap:8px;margin-bottom:14px}.score-card strong{font-size:42px;color:#087443}.score-card em{margin-left:12px;color:#16864b;font-style:normal}.summary-line{display:flex;gap:16px;flex-wrap:wrap;padding:12px;background:#f5fbf7;border-radius:10px}.question-review{padding-left:20px}.question-review li{margin:14px 0;padding-bottom:12px;border-bottom:1px solid #eef2f0}.question-review p{margin:8px 0;color:#5d6762}.question-review small{color:#7c8681}
-@media(max-width:760px){.assessment-page{padding:10px}.toolbar input{width:100%}.form-grid{grid-template-columns:1fr}.tabs{overflow:auto}.tabs span{display:none}}
+.link-title{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#126d42;background:none;cursor:pointer;text-align:left}
+.participants-dialog{width:min(1180px,98vw)}
+.participants-body{padding:18px}
+.assessment-brief{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 16px;background:#f6fbf7;border:1px solid #dfeee4;border-radius:12px}
+.assessment-brief strong,.assessment-brief span{display:block}
+.assessment-brief strong{font-size:18px}
+.assessment-brief span,.assessment-brief p{margin:4px 0 0;color:#65716b}
+.participant-stats{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin:14px 0}
+.participant-stats span{padding:12px;color:#166d42;background:#f3faf5;border:1px solid #e1eee6;border-radius:10px;font-weight:600}
+.participant-tabs{display:flex;gap:8px;margin-bottom:12px}
+.participant-tabs button{height:34px;padding:0 14px;border:1px solid #dce5df;border-radius:18px;background:#fff;cursor:pointer}
+.participant-tabs button.active{color:#fff;background:#087443;border-color:#087443}
+.participant-tools{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.participant-tools input,.participant-tools select{height:38px;padding:0 12px;border:1px solid #dce2de;border-radius:8px}
+.participant-tools input{width:230px}
+.participant-tools button,.reminder-box button{height:38px;padding:0 14px;border:1px solid #dce2de;border-radius:8px;background:#fff;cursor:pointer}
+.reminder-box{display:grid;grid-template-columns:1fr auto;gap:8px;margin-bottom:12px;padding:12px;border:1px solid #e4ebe7;border-radius:12px}
+.reminder-box textarea{grid-column:1/2;height:64px;padding:10px;border:1px solid #dce2de;border-radius:8px;resize:vertical}
+.reminder-box small{align-self:end;color:#8a948f}
+.reminder-box div{grid-column:1/-1;display:flex;gap:10px;justify-content:flex-end}
+.reminder-box p{grid-column:1/-1;margin:0;color:#5d6762}
+.participant-table table{min-width:1120px}
+.participant-table td strong,.participant-table td small{display:block}
+.participant-table td small{margin-top:3px;color:#7b8580}
+@media(max-width:760px){.assessment-page{padding:10px}.toolbar input{width:100%}.form-grid{grid-template-columns:1fr}.tabs{overflow:auto}.tabs span{display:none}.participant-stats{grid-template-columns:1fr 1fr}.assessment-brief{align-items:flex-start;flex-direction:column}.reminder-box{grid-template-columns:1fr}.reminder-box textarea{grid-column:1}}
 </style>

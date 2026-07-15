@@ -38,3 +38,6 @@ export const getAssessmentResults = (params = {}) => request(`${RESULT_ROOT}${qu
 export const getAssessmentResult = (attemptId) => request(`${RESULT_ROOT}/${attemptId}`).then(unwrap)
 export const getAssessmentResultSummary = (assessmentId) => request(`${ASSESSMENT_ROOT}/${assessmentId}/result-summary`).then(unwrap)
 export const exportAssessmentResults = (params = {}) => requestBlob(`${RESULT_ROOT}/export${queryString(params)}`)
+export const getAssessmentParticipants = (assessmentId, params = {}) => request(`${ASSESSMENT_ROOT}/${assessmentId}/participants${queryString(params)}`).then(unwrap)
+export const sendNonParticipantReminders = (assessmentId, payload) => request(`${ASSESSMENT_ROOT}/${assessmentId}/non-participant-reminders`, { method:'POST', body:JSON.stringify(payload) }).then(unwrap)
+export const getAssessmentReminders = (assessmentId, params = {}) => request(`${ASSESSMENT_ROOT}/${assessmentId}/reminders${queryString(params)}`).then(unwrap)
