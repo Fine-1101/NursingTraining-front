@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import {
   closeAssessment,
   createAssessment,
@@ -32,6 +32,7 @@ const loading = ref(false)
 const categories = ref([])
 const courses = ref([])
 const departments = ref([])
+const categoryTree = ref([])
 
 const questionQuery = reactive({ keyword:'', categoryId:'', courseId:'', questionType:'', difficulty:'', status:'', scope:'', page:1, size:10 })
 const questionPage = reactive({ records:[], total:0, pages:1 })
@@ -44,7 +45,7 @@ const questionModal = reactive({
 const assessmentQuery = reactive({ keyword:'', courseId:'', categoryId:'', status:'', startFrom:'', startTo:'', page:1, size:10 })
 const assessmentPage = reactive({ records:[], total:0, pages:1 })
 const assessmentModal = reactive({
-  open:false, loading:false, mode:'create', id:null, courseId:'', title:'', description:'', startAt:'', endAt:'',
+  open:false, loading:false, mode:'create', id:null, categoryId:'', courseId:'', title:'', description:'', startAt:'', endAt:'',
   durationMinutes:60, passScore:60, maxAttempts:1,
   drawRules:[
     { questionType:1, questionCount:40, scorePerQuestion:2 },
@@ -61,11 +62,62 @@ const categoryOptions = computed(() => categories.value)
 const courseOptions = computed(() => courses.value)
 const currentTitle = computed(() => active.value)
 
+/** 构建每个类别ID到其所有子孙ID（含自身）的映射 */
+const categoryDescendantMap = computed(() => {
+  const map = {}
+  function walk(nodes) {
+    for (const node of (nodes || [])) {
+      const id = node.id || node.categoryId
+      const desc = new Set([id])
+      function collect(children) {
+        for (const child of (children || [])) {
+          const cid = child.id || child.categoryId
+          if (cid) desc.add(cid)
+          collect(child.children || [])
+        }
+      }
+      collect(node.children || [])
+      if (id) map[id] = desc
+      walk(node.children || [])
+    }
+  }
+  walk(categoryTree.value)
+  return map
+})
+
+/** 题目弹窗中，按所选类别过滤可选课程（含子类别） */
+const questionCourseOptions = computed(() => {
+  const catId = questionModal.categoryId
+  if (!catId) return courses.value
+  const descendants = categoryDescendantMap.value[catId]
+  if (!descendants) return []
+  return courses.value.filter(c => descendants.has(c.categoryId))
+})
+
+/** 考核弹窗中，按所选类别过滤可选课程（含子类别） */
+const assessmentCourseOptions = computed(() => {
+  const catId = assessmentModal.categoryId
+  if (!catId) return courses.value
+  const descendants = categoryDescendantMap.value[catId]
+  if (!descendants) return []
+  return courses.value.filter(c => descendants.has(c.categoryId))
+})
+
 watch(() => props.section, value => {
   if (value && value !== active.value) {
     active.value = value
     loadCurrent()
   }
+})
+
+/** 切换所属类别时，清空已选课程并重新过滤 */
+watch(() => questionModal.categoryId, () => {
+  questionModal.courseIds = []
+})
+
+/** 考核弹窗切换类别时，清空已选课程 */
+watch(() => assessmentModal.categoryId, () => {
+  assessmentModal.courseId = ''
 })
 
 function option(key, content = '', isCorrect = false, sortOrder = 1) {
@@ -107,8 +159,10 @@ async function loadOptions() {
       getCourses({ page:1, size:100 }),
       getSettingsDepartmentOptions().catch(() => []),
     ])
-    categories.value = flattenCategories(tree?.categories || tree?.children || [])
-    courses.value = (coursePage?.records || []).map(item => ({ id:item.id || item.courseId, title:item.title || item.courseTitle })).filter(item => item.id && item.title)
+    const rawTree = tree?.categories || tree?.children || []
+    categoryTree.value = rawTree
+    categories.value = flattenCategories(rawTree)
+    courses.value = (coursePage?.records || []).map(item => ({ id:item.id || item.courseId, title:item.title || item.courseTitle, categoryId:item.categoryId || null })).filter(item => item.id && item.title)
     departments.value = (deptOptions || []).map(item => ({ id:item.departmentId || item.id, name:item.departmentName || item.name })).filter(item => item.id && item.name)
   } catch (error) {
     toast(error.message, 'error')
@@ -221,7 +275,7 @@ function resetAssessmentQuery() {
 }
 function openCreateAssessment() {
   capacity.value = null
-  Object.assign(assessmentModal, { open:true, loading:false, mode:'create', id:null, courseId:'', title:'', description:'', startAt:'', endAt:'', durationMinutes:60, passScore:60, maxAttempts:1 })
+  Object.assign(assessmentModal, { open:true, loading:false, mode:'create', id:null, categoryId:'', courseId:'', title:'', description:'', startAt:'', endAt:'', durationMinutes:60, passScore:60, maxAttempts:1 })
   assessmentModal.drawRules = [{ questionType:1, questionCount:40, scorePerQuestion:2 }, { questionType:2, questionCount:20, scorePerQuestion:1 }]
 }
 async function openEditAssessment(row) {
@@ -230,10 +284,14 @@ async function openEditAssessment(row) {
   try {
     const data = await getAssessment(row.id)
     Object.assign(assessmentModal, {
-      loading:false, courseId:data.courseId || '', title:data.title || '', description:data.description || '',
+      loading:false, categoryId:data.categoryId || '', title:data.title || '', description:data.description || '',
       startAt:toInputDateTime(data.startAt), endAt:toInputDateTime(data.endAt), durationMinutes:data.durationMinutes || 60,
       passScore:data.passScore || 60, maxAttempts:data.maxAttempts || 1,
     })
+    // categoryId 变化触发的 watch 是异步的，会在渲染前清空 courseId
+    // 用 nextTick 等 watch 执行完后再设置 courseId
+    await nextTick()
+    assessmentModal.courseId = data.courseId || ''
     assessmentModal.drawRules = (data.drawRules?.length ? data.drawRules : assessmentModal.drawRules).map(item => ({
       questionType:item.questionType,
       questionCount:item.questionCount,
@@ -375,7 +433,7 @@ onMounted(async () => {
           <thead><tr><th>题干</th><th>题型</th><th>类别</th><th>难度</th><th>适用范围</th><th>状态</th><th>更新时间</th><th>操作</th></tr></thead>
           <tbody>
             <tr v-for="row in questionPage.records" :key="row.id">
-              <td class="stem">{{ row.stem }}</td><td>{{ row.questionTypeName || questionTypeText(row.questionType) }}</td><td>{{ row.categoryName || '—' }}</td><td>{{ row.difficultyName || difficultyText(row.difficulty) }}</td><td>{{ row.scopeName || (row.courseIds?.length ? '指定课程' : '类别通用') }}</td><td><span class="badge" :class="{ off:Number(row.status)!==1 }">{{ questionStatusText(row.status) }}</span></td><td>{{ row.updatedAt || row.createdAt || '—' }}</td>
+              <td class="stem">{{ row.stem }}</td><td>{{ row.questionTypeName || questionTypeText(row.questionType) }}</td><td>{{ row.categoryName || '—' }}</td><td>{{ row.difficultyName || difficultyText(row.difficulty) }}</td><td>{{ row.scopeName || (row.courseIds?.length ? '指定课程' : '类别及子类别通用') }}</td><td><span class="badge" :class="{ off:Number(row.status)!==1 }">{{ questionStatusText(row.status) }}</span></td><td>{{ row.updatedAt || row.createdAt || '—' }}</td>
               <td class="actions"><button @click="openEditQuestion(row)">编辑</button><button @click="toggleQuestionStatus(row)">{{ Number(row.status) === 1 ? '停用' : '启用' }}</button><button class="danger-text" @click="removeQuestion(row)">删除</button></td>
             </tr>
           </tbody>
@@ -447,7 +505,7 @@ onMounted(async () => {
             <strong>选项与答案</strong>
             <label v-for="item in questionModal.options" :key="item.optionKey"><input type="radio" name="correct" :checked="item.isCorrect" @change="setCorrectOption(item.optionKey)" /><b>{{ item.optionKey }}</b><input v-model="item.content" placeholder="选项内容" /></label>
           </div>
-          <label class="full">指定课程范围<select v-model="questionModal.courseIds" multiple><option v-for="item in courseOptions" :key="item.id" :value="String(item.id)">{{ item.title }}</option></select><small>不选表示该类别下所有课程可用</small></label>
+          <label class="full">指定课程范围<select v-model="questionModal.courseIds" multiple><option v-for="item in questionCourseOptions" :key="item.id" :value="String(item.id)">{{ item.title }}</option></select><small>不选表示该类别及其子类别下所有课程可用</small></label>
         </div>
         <footer><button type="button" @click="questionModal.open=false">取消</button><button class="primary" :disabled="questionModal.loading">保存</button></footer>
       </form>
@@ -457,7 +515,8 @@ onMounted(async () => {
       <form class="dialog wide" @submit.prevent="saveAssessment">
         <header><h2>{{ assessmentModal.mode === 'edit' ? '编辑考核草稿' : '新建考核草稿' }}</h2><button type="button" @click="assessmentModal.open=false">×</button></header>
         <div class="form-grid">
-          <label>所属课程<select v-model="assessmentModal.courseId" required><option value="">请选择</option><option v-for="item in courseOptions" :key="item.id" :value="item.id">{{ item.title }}</option></select></label>
+          <label>所属类别（筛选课程）<select v-model="assessmentModal.categoryId"><option value="">全部</option><option v-for="item in categoryOptions" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
+          <label>所属课程<select v-model="assessmentModal.courseId" required><option value="">请选择</option><option v-for="item in assessmentCourseOptions" :key="item.id" :value="item.id">{{ item.title }}</option></select></label>
           <label>考核名称<input v-model="assessmentModal.title" maxlength="200" required /></label>
           <label>开考时间<input v-model="assessmentModal.startAt" type="datetime-local" required /></label>
           <label>最晚开考<input v-model="assessmentModal.endAt" type="datetime-local" /></label>
