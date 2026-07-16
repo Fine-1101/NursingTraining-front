@@ -1,4 +1,4 @@
-import { ApiError, request } from './api'
+import { ApiError, request, requestBlob } from './api'
 import { UPLOAD_TYPES, uploadFile } from './file'
 
 const ROOT = '/api/admin/ppts'
@@ -25,6 +25,8 @@ export const updatePpt = (id, payload) => request(`${ROOT}/${id}`, { method: 'PU
 export const updatePptStatus = (id, status) => request(`${ROOT}/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }).then(unwrap)
 export const deletePpt = (id) => request(`${ROOT}/${id}`, { method: 'DELETE' }).then(unwrap)
 export const getPptDownload = (id) => request(`${ROOT}/${id}/download-url`).then(unwrap)
+export const convertPpt = (id) => request(`${ROOT}/${id}/convert`, { method: 'POST' }).then(unwrap)
+export const getPptPreview = (id) => requestBlob(`${ROOT}/${id}/preview`)
 
 export async function uploadPptFile(file) {
   const result = await uploadFile(file, UPLOAD_TYPES.PPT_FILE)

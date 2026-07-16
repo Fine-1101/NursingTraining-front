@@ -13,6 +13,24 @@ button, input { font: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; }
 button { border: 0; }
 
+input[type="date"]:not(:focus):not(.has-value)::-webkit-datetime-edit,
+input[type="datetime-local"]:not(:focus):not(.has-value)::-webkit-datetime-edit,
+input[type="month"]:not(:focus):not(.has-value)::-webkit-datetime-edit,
+input[type="time"]:not(:focus):not(.has-value)::-webkit-datetime-edit {
+  color: transparent;
+}
+
+input[type="date"]:focus::-webkit-datetime-edit,
+input[type="datetime-local"]:focus::-webkit-datetime-edit,
+input[type="month"]:focus::-webkit-datetime-edit,
+input[type="time"]:focus::-webkit-datetime-edit,
+input[type="date"].has-value::-webkit-datetime-edit,
+input[type="datetime-local"].has-value::-webkit-datetime-edit,
+input[type="month"].has-value::-webkit-datetime-edit,
+input[type="time"].has-value::-webkit-datetime-edit {
+  color: inherit;
+}
+
 :focus-visible {
   outline: 3px solid rgba(81, 173, 79, .28);
   outline-offset: 2px;

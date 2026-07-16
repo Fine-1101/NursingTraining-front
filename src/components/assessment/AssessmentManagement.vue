@@ -49,11 +49,8 @@ const assessmentQuery = reactive({ keyword:'', courseId:'', categoryId:'', statu
 const assessmentPage = reactive({ records:[], total:0, pages:1 })
 const assessmentModal = reactive({
   open:false, loading:false, mode:'create', id:null, categoryId:'', courseId:'', title:'', description:'', startAt:'', endAt:'',
-  durationMinutes:60, passScore:60, maxAttempts:1,
-  drawRules:[
-    { questionType:1, questionCount:40, scorePerQuestion:2 },
-    { questionType:2, questionCount:20, scorePerQuestion:1 },
-  ],
+  durationMinutes:60, passScore:60, maxAttempts:1, difficultyLevel:2,
+  drawRules:createDefaultDrawRules(),
 })
 const capacity = ref(null)
 
@@ -139,7 +136,13 @@ function money(value) { return Number(value || 0).toFixed(2) }
 function statusText(value) { return ({ 0:'草稿', 1:'已发布', 2:'已关闭' })[Number(value)] || '未知' }
 function questionStatusText(value) { return Number(value) === 1 ? '启用' : '停用' }
 function questionTypeText(value) { return Number(value) === 1 ? '单选题' : '判断题' }
-function difficultyText(value) { return ({ 1:'简单', 2:'中等', 3:'困难' })[Number(value)] || '中等' }
+function difficultyText(value) { return value == null ? '不限难度' : (({ 1:'简单', 2:'中等', 3:'困难' })[Number(value)] || '中等') }
+function createDefaultDrawRules() {
+  return [
+    { questionType:1, difficulty:null, questionCount:40, scorePerQuestion:2 },
+    { questionType:2, difficulty:null, questionCount:20, scorePerQuestion:1 },
+  ]
+}
 function passText(value) { return value === true ? '通过' : value === false ? '未通过' : '—' }
 function participationText(value) {
   return ({ ALL:'全部', PARTICIPATED:'已参加', NOT_PARTICIPATED:'未参加', IN_PROGRESS:'答题中', SUBMITTED:'已交卷' })[value] || value || '—'
@@ -289,8 +292,8 @@ function resetAssessmentQuery() {
 }
 function openCreateAssessment() {
   capacity.value = null
-  Object.assign(assessmentModal, { open:true, loading:false, mode:'create', id:null, categoryId:'', courseId:'', title:'', description:'', startAt:'', endAt:'', durationMinutes:60, passScore:60, maxAttempts:1 })
-  assessmentModal.drawRules = [{ questionType:1, questionCount:40, scorePerQuestion:2 }, { questionType:2, questionCount:20, scorePerQuestion:1 }]
+  Object.assign(assessmentModal, { open:true, loading:false, mode:'create', id:null, categoryId:'', courseId:'', title:'', description:'', startAt:'', endAt:'', durationMinutes:60, passScore:60, maxAttempts:1, difficultyLevel:2 })
+  assessmentModal.drawRules = createDefaultDrawRules()
 }
 async function openEditAssessment(row) {
   capacity.value = null
@@ -301,16 +304,21 @@ async function openEditAssessment(row) {
       loading:false, categoryId:data.categoryId || '', title:data.title || '', description:data.description || '',
       startAt:toInputDateTime(data.startAt), endAt:toInputDateTime(data.endAt), durationMinutes:data.durationMinutes || 60,
       passScore:data.passScore || 60, maxAttempts:data.maxAttempts || 1,
+      difficultyLevel:data.difficultyLevel || 2,
     })
     // categoryId 变化触发的 watch 是异步的，会在渲染前清空 courseId
     // 用 nextTick 等 watch 执行完后再设置 courseId
     await nextTick()
     assessmentModal.courseId = data.courseId || ''
-    assessmentModal.drawRules = (data.drawRules?.length ? data.drawRules : assessmentModal.drawRules).map(item => ({
-      questionType:item.questionType,
-      questionCount:item.questionCount,
-      scorePerQuestion:item.scorePerQuestion,
-    }))
+    assessmentModal.drawRules = [1, 2].map(questionType => {
+      const items = (data.drawRules || []).filter(item => Number(item.questionType) === questionType)
+      return {
+        questionType,
+        difficulty:null,
+        questionCount:items.reduce((sum, item) => sum + Number(item.questionCount || 0), 0),
+        scorePerQuestion:Number(items[0]?.scorePerQuestion ?? (questionType === 1 ? 2 : 1)),
+      }
+    })
   } catch (error) {
     assessmentModal.open = false
     toast(error.message, 'error')
@@ -322,7 +330,7 @@ function assessmentPayload() {
   if (!assessmentModal.startAt) throw new Error('请选择开考时间')
   const drawRules = assessmentModal.drawRules
     .filter(item => Number(item.questionCount) > 0)
-    .map(item => ({ questionType:Number(item.questionType), questionCount:Number(item.questionCount), scorePerQuestion:Number(item.scorePerQuestion) }))
+    .map(item => ({ questionType:Number(item.questionType), difficulty:item.difficulty == null ? null : Number(item.difficulty), questionCount:Number(item.questionCount), scorePerQuestion:Number(item.scorePerQuestion) }))
   if (!drawRules.length) throw new Error('请至少设置一种抽题规则')
   return {
     courseId:Number(assessmentModal.courseId),
@@ -333,6 +341,7 @@ function assessmentPayload() {
     durationMinutes:Number(assessmentModal.durationMinutes),
     passScore:Number(assessmentModal.passScore),
     maxAttempts:Number(assessmentModal.maxAttempts),
+    difficultyLevel:Number(assessmentModal.difficultyLevel),
     drawRules,
   }
 }
@@ -624,9 +633,10 @@ onMounted(async () => {
           <label>答题时长<input v-model.number="assessmentModal.durationMinutes" type="number" min="1" /></label>
           <label>及格分<input v-model.number="assessmentModal.passScore" type="number" min="0" step="0.5" /></label>
           <label>最多次数<input v-model.number="assessmentModal.maxAttempts" type="number" min="1" /></label>
+          <label>考核难度<select v-model.number="assessmentModal.difficultyLevel"><option :value="1">简单（简单题为主）</option><option :value="2">中等（中等题为主）</option><option :value="3">困难（困难题为主）</option></select></label>
           <label class="full">考核说明<textarea v-model="assessmentModal.description" maxlength="1000" /></label>
-          <div class="full rules"><strong>随机组卷规则</strong><div v-for="rule in assessmentModal.drawRules" :key="rule.questionType"><span>{{ questionTypeText(rule.questionType) }}</span><input v-model.number="rule.questionCount" type="number" min="0" /> 道 × <input v-model.number="rule.scorePerQuestion" type="number" min="0" step="0.5" /> 分</div></div>
-          <div v-if="capacity" class="full capacity"><b>题量检查：</b><span :class="{ ok:capacity.publishable }">{{ capacity.publishable ? '满足发布条件' : '题量不足' }}</span><p v-for="item in capacity.items" :key="item.questionType">{{ questionTypeText(item.questionType) }}：需要 {{ item.requiredCount }}，可用 {{ item.availableCount }}</p></div>
+          <div class="full rules"><strong>随机组卷规则</strong><div v-for="rule in assessmentModal.drawRules" :key="rule.questionType"><span>{{ questionTypeText(rule.questionType) }}</span><input v-model.number="rule.questionCount" type="number" min="0" /> 道 × <input v-model.number="rule.scorePerQuestion" type="number" min="0" step="0.5" /> 分</div><small>系统会根据考核难度自动计算简单、中等、困难题目的数量。</small></div>
+          <div v-if="capacity" class="full capacity"><b>题量检查：</b><span :class="{ ok:capacity.publishable }">{{ capacity.publishable ? '满足发布条件' : '题量不足' }}</span><p v-for="item in capacity.items" :key="`${item.questionType}-${item.difficulty ?? 'all'}`">{{ questionTypeText(item.questionType) }} · {{ difficultyText(item.difficulty) }}：需要 {{ item.requiredCount }}，可用 {{ item.availableCount }}</p></div>
         </div>
         <footer><button type="button" @click="assessmentModal.open=false">取消</button><button class="primary" :disabled="assessmentModal.loading">保存草稿</button></footer>
       </form>
