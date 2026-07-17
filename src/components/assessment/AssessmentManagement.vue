@@ -28,6 +28,7 @@ import { getCourses } from '@/services/course'
 import { getSettingsDepartmentOptions } from '@/services/settings'
 
 const props = defineProps({ section: { type:String, default:'题库管理' } })
+const emit = defineEmits(['section-change'])
 
 const active = ref(props.section || '题库管理')
 const message = ref(null)
@@ -192,6 +193,7 @@ async function loadCurrent() {
 }
 function switchTab(tab) {
   active.value = tab
+  emit('section-change', tab)
   loadCurrent()
 }
 

@@ -59,7 +59,9 @@ function toast(text, type = 'success') {
 async function loadTree() {
   loading.value = true
   try {
-    const data = await getCategoryTree({ keyword: filters.keyword.trim(), status: filters.status, parentId: filters.parentId })
+    const params = { keyword: filters.keyword.trim(), status: filters.status }
+    if (filters.parentId && String(filters.parentId) !== '0') params.parentId = filters.parentId
+    const data = await getCategoryTree(params)
     roots.value = data?.categories || []
     total.value = data?.total || 0
     expanded.value = new Set(collectExpandableIds(roots.value))
@@ -96,10 +98,12 @@ async function saveCategory() {
   modal.loading = true
   const payload = { name, parentId: Number(modal.parentId), icon: modal.icon || null, status: Number(modal.status) }
   try {
+    const isCreate = modal.mode === 'create'
     if (modal.mode === 'edit') await updateCategory(modal.id, { ...payload, cascade: true })
     else await createCategory(payload)
     modal.open = false
     toast(modal.mode === 'edit' ? '类别已更新' : '类别已创建')
+    if (isCreate) Object.assign(filters, { keyword: '', status: '', parentId: '0' })
     await refresh()
   } catch (error) { toast(error.message, 'error') }
   finally { modal.loading = false }

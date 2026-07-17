@@ -180,7 +180,7 @@ function searchReminderHistory() {
         <ArticleManagement v-else-if="active === '文章管理'" />
         <PptManagement v-else-if="active === 'PPT管理'" />
         <VideoManagement v-else-if="active === '视频管理'" />
-        <AssessmentManagement v-else-if="assessmentMenuActive" :section="active" />
+        <AssessmentManagement v-else-if="assessmentMenuActive" :section="active" @section-change="select" />
         <CourseManagement v-else-if="active === '课程列表' || active === '课程管理'" @create-course="createCourse" @edit-course="editCourse" />
         <CourseCreate v-else-if="active === '新建课程'" :edit-course-id="courseEditor.id" :reset-key="courseEditor.resetKey" @open-library="openLibrary" />
         <div v-else class="empty-module"></div>
