@@ -99,7 +99,7 @@ export async function requestBlob(path, options = {}) {
   return { blob, filename, contentType: response.headers.get('content-type') || '' }
 }
 
-export const login = (credentials) => request('/api/auth/login', {
+export const login = (credentials) => request('/api/admin/login', {
   method: 'POST',
   body: JSON.stringify(credentials),
 })

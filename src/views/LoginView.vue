@@ -30,6 +30,7 @@ async function submit() {
     const response = await login({ username: username.value.trim(), password: password.value })
     const data = response?.data
     if (!data?.accessToken) throw new Error('登录响应中缺少 Token')
+    if (String(data.user?.role) !== '5') throw new Error('仅允许管理员账号登录管理端')
     setToken(data.accessToken)
     if (data.user) setStoredUser(data.user)
     remember.value ? rememberUsername(username.value.trim()) : forgetUsername()
